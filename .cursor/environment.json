@@ -1,0 +1,4 @@
+{
+  "name": "fubon-notebook",
+  "install": "pip install pillow"
+}
