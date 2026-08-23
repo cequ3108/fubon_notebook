@@ -75,6 +75,199 @@ class PositionPlan:
     deposit_est_twd: int
     tickets: list[BidTicket] = field(default_factory=list)
     rationale: str = ""
+    purpose_category: str = "unknown"
+    purpose_score: int = 50
+    purpose_label: str = "用途未明"
+    purpose_text: str = ""
+
+
+
+@dataclass
+class PurposeInfo:
+    raw_text: str = ""
+    category: str = "unknown"  # growth / working_capital / refinance / mixed / unknown
+    score: int = 50  # 0-100，越高越偏成長用途
+    label: str = "用途未明"
+    note: str = ""
+
+
+def _mops_list_cb_resolutions(stock_code: str, year: str) -> list[dict[str, str]]:
+    payload = urllib.parse.urlencode({
+        "encodeURIComponent": "1",
+        "step": "1",
+        "firstin": "1",
+        "off": "1",
+        "TYPEK": "sii",
+        "co_id": stock_code,
+        "year": year,
+        "month": "",
+        "b_date": "",
+        "e_date": "",
+    }).encode()
+    req = urllib.request.Request(
+        "https://mopsov.twse.com.tw/mops/web/ajax_t05st01",
+        data=payload,
+        headers={"User-Agent": USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        html = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "replace")
+    except (urllib.error.URLError, TimeoutError):
+        return []
+    out: list[dict[str, str]] = []
+    for row in re.findall(r"<tr[^>]*>.*?</tr>", html, re.S):
+        if "轉換公司債" not in row and "可轉換公司債" not in row:
+            continue
+        if not any(k in row for k in ("董事會", "決議", "發行")):
+            continue
+        # 排除贖回／注意交易等雜訊
+        if any(k in row for k in ("贖回", "注意交易", "代收價款", "終止櫃檯")):
+            continue
+        m = re.search(
+            r"seq_no\.value='(\d+)'.*?spoke_time\.value='(\d+)'.*?spoke_date\.value='(\d+)'",
+            row,
+            re.S,
+        )
+        if not m:
+            continue
+        title = re.sub(r"<[^>]+>", " ", row)
+        title = re.sub(r"\s+", " ", title).strip()
+        out.append({
+            "seq_no": m.group(1),
+            "spoke_time": m.group(2),
+            "spoke_date": m.group(3),
+            "title": title,
+        })
+    return out
+
+
+def _mops_resolution_detail(stock_code: str, year: str, item: dict[str, str]) -> str:
+    payload = urllib.parse.urlencode({
+        "encodeURIComponent": "1",
+        "step": "2",
+        "firstin": "1",
+        "off": "1",
+        "TYPEK": "sii",
+        "co_id": stock_code,
+        "year": year,
+        "seq_no": item["seq_no"],
+        "spoke_time": item["spoke_time"],
+        "spoke_date": item["spoke_date"],
+    }).encode()
+    req = urllib.request.Request(
+        "https://mopsov.twse.com.tw/mops/web/ajax_t05st01",
+        data=payload,
+        headers={"User-Agent": USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        html = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "replace")
+    except (urllib.error.URLError, TimeoutError):
+        return ""
+    text = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", text)
+
+
+def extract_purpose_text(detail: str) -> str:
+    m = re.search(r"募得價款之用途及運用計畫[:：]\s*(.+?)(?=\s*\d{1,2}\.|$)", detail)
+    if not m:
+        return ""
+    purpose = m.group(1).strip(" 。;；")
+    # 截斷承銷方式等後續欄位殘留
+    purpose = re.split(r"\s+\d{1,2}\.", purpose)[0].strip()
+    return purpose[:120]
+
+
+def classify_purpose(purpose: str) -> PurposeInfo:
+    if not purpose:
+        return PurposeInfo(note="公開資訊未找到資金用途，暫不調整")
+
+    growth_kw = ("研發", "購置", "機器", "設備", "擴充", "擴產", "廠房", "興建", "產能", "轉投資", "併購", "建廠", "資本支出")
+    refinance_kw = ("償還銀行", "償還借款", "償還公司債", "償還債務", "還款", "借新還舊")
+    wc_kw = ("充實營運", "營運資金", "營運週轉")
+
+    has_g = any(k in purpose for k in growth_kw)
+    has_r = any(k in purpose for k in refinance_kw)
+    has_w = any(k in purpose for k in wc_kw)
+
+    if has_g and not has_r:
+        return PurposeInfo(purpose, "growth", 82, "偏成長用途", f"用途「{purpose}」偏擴產／設備／研發，較具成長想像，可相對積極")
+    if has_g and has_r:
+        return PurposeInfo(purpose, "mixed", 58, "成長＋還債混合", f"用途「{purpose}」含成長與還債，中性偏多，勿過度追價")
+    if has_r and has_w:
+        return PurposeInfo(purpose, "refinance", 32, "還債＋營運資金", f"用途「{purpose}」偏財務調度／借新還舊，建議縮小部位、標價勿衝太高")
+    if has_r:
+        return PurposeInfo(purpose, "refinance", 25, "偏還舊債", f"用途「{purpose}」以償債為主，成長性較弱，宜保守出價")
+    if has_w:
+        return PurposeInfo(purpose, "working_capital", 48, "充實營運資金", f"用途「{purpose}」偏營運週轉，中性，標價維持合理區間即可")
+    return PurposeInfo(purpose, "unknown", 50, "用途未分類", f"用途「{purpose}」無法明確歸類，暫維持中性")
+
+
+def fetch_cb_purpose(stock_code: str, bond_name: str = "", cache: dict[str, PurposeInfo] | None = None) -> PurposeInfo:
+    if cache is not None and stock_code in cache:
+        return cache[stock_code]
+    info = PurposeInfo(note="查無董事會發行決議")
+    # 民國年：以目前年份推估，並往前一年備援
+    roc_now = datetime.now(TPE).year - 1911
+    for year in (str(roc_now), str(roc_now - 1)):
+        items = _mops_list_cb_resolutions(stock_code, year)
+        # 優先標題含「決議…發行」且盡量對應期別
+        ranked = []
+        for it in items:
+            score = 0
+            title = it["title"]
+            if "董事會" in title and "發行" in title:
+                score += 5
+            if bond_name and bond_name[:2] in title:
+                score += 3
+            # 期別提示：第三次 / 第二 etc
+            m = re.search(r"第([一二三四五六七八九十]+)次", bond_name or "")
+            if m and m.group(0) in title:
+                score += 10
+            ranked.append((score, it))
+        ranked.sort(key=lambda x: -x[0])
+        for score, it in ranked:
+            if score < 5:
+                continue
+            detail = _mops_resolution_detail(stock_code, year, it)
+            purpose = extract_purpose_text(detail)
+            if purpose:
+                info = classify_purpose(purpose)
+                break
+        if info.raw_text:
+            break
+    if cache is not None:
+        cache[stock_code] = info
+    return info
+
+
+def apply_purpose_to_bids(
+    bid_low: float,
+    bid_high: float,
+    fair: float,
+    floor: float,
+    purpose: PurposeInfo,
+) -> tuple[float, float, list[str]]:
+    """依資金用途壓縮或放寬標價上緣。"""
+    notes: list[str] = []
+    low, high = bid_low, bid_high
+    cat = purpose.category
+    if cat == "growth":
+        # 成長案可稍微靠近上緣，但不盲目加價
+        high = min(high * 1.01, high + 1.0)
+        notes.append("成長用途：可相對積極，但仍以合理價附近為核心倉")
+    elif cat == "refinance":
+        # 還債案：上緣壓回合理價附近，避免追高
+        high = min(high, max(fair * 1.02, (fair + floor) / 2 + (fair - floor) * 0.35))
+        high = max(high, low)
+        notes.append("還債／調度用途：建議標價勿衝太高，保險倉靠近合理價即可")
+    elif cat == "working_capital":
+        high = min(high, fair + (bid_high - fair) * 0.7)
+        high = max(high, low)
+        notes.append("營運資金用途：中性，維持合理區間、少追高")
+    elif cat == "mixed":
+        high = min(high, fair + (bid_high - fair) * 0.85)
+        high = max(high, low)
+        notes.append("混合用途：可參與但控制最高標")
+    return round(low, 2), round(high, 2), notes
 
 
 @dataclass
@@ -132,8 +325,13 @@ def http_json(url: str, timeout: int = 30) -> Any:
 
 def http_text(url: str, timeout: int = 30) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:  # IncompleteRead / transient network
+        # 再試一次
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
 
 
 def ts_to_date(ts: int | None) -> date | None:
@@ -310,9 +508,26 @@ def adjust_budget(
     parity: float | None,
     issue_amount_100m: float | None,
     auction_lots: int | None,
+    purpose: PurposeInfo | None = None,
 ) -> tuple[int, list[str]]:
     reasons: list[str] = []
     budget = float(base)
+
+    if purpose is not None:
+        if purpose.category == "growth":
+            budget *= 1.15
+            reasons.append(f"資金用途偏成長（{purpose.label}），部位略增")
+        elif purpose.category == "refinance":
+            budget *= 0.75
+            reasons.append(f"資金用途偏還債／調度（{purpose.label}），部位下修")
+        elif purpose.category == "working_capital":
+            budget *= 0.95
+            reasons.append(f"資金用途偏營運資金（{purpose.label}），部位略保守")
+        elif purpose.category == "mixed":
+            budget *= 0.95
+            reasons.append(f"資金用途混合（{purpose.label}），部位略保守")
+        elif purpose.note:
+            reasons.append(purpose.note)
 
     if tcri is not None:
         if tcri <= 4:
@@ -433,13 +648,22 @@ def build_ladder_tickets(
     return tickets
 
 
-def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> PositionPlan:
+def build_position_plan(
+    auction: AuctionRow,
+    shares_map: dict[str, int],
+    purpose_cache: dict[str, PurposeInfo] | None = None,
+) -> PositionPlan:
     cap = market_cap_yi(auction.stock_code, auction.stock_price, shares_map)
     tier = classify_size_tier(cap)
     base = base_budget_for_tier(tier)
     tcri = parse_tcri(auction.meta)
     collateral = auction.meta.collateral if auction.meta else ""
     issue_amt = auction.meta.issue_amount_100m if auction.meta else None
+
+    purpose = fetch_cb_purpose(auction.stock_code, auction.name, purpose_cache)
+    auction.notes.append(f"資金用途：{purpose.raw_text or '未取得'}（{purpose.label}，評分 {purpose.score}）")
+    if purpose.note:
+        auction.notes.append(purpose.note)
 
     budget, reasons = adjust_budget(
         base,
@@ -448,16 +672,28 @@ def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> Posi
         parity=auction.parity,
         issue_amount_100m=issue_amt,
         auction_lots=auction.auction_lots,
+        purpose=purpose,
     )
 
     n_tickets = tickets_for_tier(tier)
     tickets: list[BidTicket] = []
     if auction.bid_low is not None and auction.bid_high is not None and auction.fair_value is not None:
+        adj_low, adj_high, bid_notes = apply_purpose_to_bids(
+            auction.bid_low,
+            auction.bid_high,
+            auction.fair_value,
+            auction.floor_price,
+            purpose,
+        )
+        reasons.extend(bid_notes)
+        # 同步回寫建議區間（反映用途後的出價策略）
+        auction.bid_low = adj_low
+        auction.bid_high = adj_high
         tickets = build_ladder_tickets(
             budget_twd=budget,
             floor=auction.floor_price,
-            bid_low=auction.bid_low,
-            bid_high=auction.bid_high,
+            bid_low=adj_low,
+            bid_high=adj_high,
             fair=auction.fair_value,
             auction_lots=auction.auction_lots,
             min_lot=auction.min_lot or 1,
@@ -479,7 +715,8 @@ def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> Posi
     rationale = (
         f"市值約 {cap_txt} → {tier_label}股，基準配置 {base / 1e4:.0f} 萬；"
         + ("；".join(reasons) if reasons else "無額外加減碼")
-        + f"。建議 {len(tickets) or n_tickets} 筆階梯標：低價衝便宜成本、高價保命中率。"
+        + f"。資金用途評分 {purpose.score}/100（{purpose.label}）；"
+        + f"建議 {len(tickets) or n_tickets} 筆階梯標：低價衝便宜成本、高價保命中率。"
     )
     return PositionPlan(
         size_tier=tier,
@@ -488,6 +725,10 @@ def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> Posi
         deposit_est_twd=deposit,
         tickets=tickets,
         rationale=rationale,
+        purpose_category=purpose.category,
+        purpose_score=purpose.score,
+        purpose_label=purpose.label,
+        purpose_text=purpose.raw_text,
     )
 
 
@@ -582,6 +823,7 @@ def normalize_auction(
     stock_cache: dict[str, float | None] | None = None,
     bond_cache: dict[tuple[str, str], dict[str, Any]] | None = None,
     shares_map: dict[str, int] | None = None,
+    purpose_cache: dict[str, PurposeInfo] | None = None,
 ) -> AuctionRow:
     bond_code = str(row.get("v3", ""))
     stock_code = infer_stock_code(bond_code)
@@ -651,7 +893,7 @@ def normalize_auction(
         auction.notes.insert(0, f"正股 {stock_code} 最近收盤 {auction.stock_price:.2f} 元")
 
     if shares_map is not None:
-        auction.position = build_position_plan(auction, shares_map)
+        auction.position = build_position_plan(auction, shares_map, purpose_cache)
     return auction
 
 
@@ -829,12 +1071,18 @@ def render_share_card(auction: AuctionRow, out_path: Path) -> Path:
     y += 48
 
     # 重點數據列
+    purpose_lbl = plan.purpose_label if plan else "用途未明"
+    purpose_score = plan.purpose_score if plan else 50
     metrics = [
         ("底標", f"{auction.floor_price:.2f}"),
         ("建議區間", f"{auction.bid_low:.2f}–{auction.bid_high:.2f}" if auction.bid_low else "-"),
         ("合理價", f"{auction.fair_value:.2f}" if auction.fair_value else "-"),
         ("部位", f"{(plan.target_budget_twd / 1e4):.0f} 萬" if plan else "-"),
     ]
+    # 額外一行：資金用途評分
+    purpose_line = f"資金用途：{purpose_lbl}（{purpose_score}/100）"
+    if plan and plan.purpose_text:
+        purpose_line += f"｜{plan.purpose_text}"
     box_w = (width - 48 * 2 - 18 * 3) // 4
     for i, (label, value) in enumerate(metrics):
         x = 48 + i * (box_w + 18)
@@ -843,7 +1091,9 @@ def render_share_card(auction: AuctionRow, out_path: Path) -> Path:
         # 縮小過長數值
         f = font_h2 if text_w(value, font_h2) < box_w - 28 else font_body
         draw.text((x + 20, y + 52), value, fill=text, font=f)
-    y += 140
+    y += 120
+    draw.text((48, y), purpose_line[:42], fill=accent, font=font_small)
+    y += 40
 
     draw.text((48, y), f"階梯標單（共 {len(tickets)} 筆）", fill=text, font=font_h2)
     y += 50
@@ -996,6 +1246,7 @@ def run(args: argparse.Namespace) -> int:
 
     stock_cache: dict[str, float | None] = {}
     bond_cache: dict[tuple[str, str], dict[str, Any]] = {}
+    purpose_cache: dict[str, PurposeInfo] = {}
     today_rows: list[AuctionRow] = []
     for row in raw:
         basic = normalize_auction(row, ipo_map, premium_stats, today, enrich=False)
@@ -1012,6 +1263,7 @@ def run(args: argparse.Namespace) -> int:
                 stock_cache=stock_cache,
                 bond_cache=bond_cache,
                 shares_map=shares_map if enrich else None,
+                purpose_cache=purpose_cache if enrich else None,
             )
         )
 
