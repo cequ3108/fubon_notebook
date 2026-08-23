@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -32,6 +33,7 @@ from typing import Any
 TPE = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
 STATE_PATH = Path(os.getenv("CB_AUCTION_STATE_PATH", ROOT / ".data" / "cb_auction_state.json"))
+CARD_DIR = Path(os.getenv("CB_AUCTION_CARD_DIR", ROOT / ".data" / "cb_cards"))
 
 AUCTION_URL = "https://www.money-link.com.tw/p/?G=m&pg=imp09_tw&id="
 BOND_URL = "https://www.money-link.com.tw/p/?G=m&pg=bnd001_tw&id={stock}"
@@ -41,7 +43,20 @@ TPEX_COMPANY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 USER_AGENT = "Mozilla/5.0 (compatible; cb-auction-monitor/1.1)"
 
 FACE_VALUE = 100_000  # 每張面額 10 萬
-N_TICKETS = 5
+# 市值越大、標單筆數越多（提高命中率）；小型至少 5 筆
+TICKETS_BY_TIER = {
+    "micro": 5,
+    "small": 5,
+    "mid": 7,
+    "large": 8,
+    "mega": 10,
+    "unknown": 5,
+}
+FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+]
 
 
 @dataclass
@@ -343,6 +358,10 @@ def adjust_budget(
     return budget_i, reasons
 
 
+def tickets_for_tier(tier: str) -> int:
+    return TICKETS_BY_TIER.get(tier, 5)
+
+
 def build_ladder_tickets(
     *,
     budget_twd: int,
@@ -352,7 +371,7 @@ def build_ladder_tickets(
     fair: float,
     auction_lots: int | None,
     min_lot: int,
-    n_tickets: int = N_TICKETS,
+    n_tickets: int = 5,
 ) -> list[BidTicket]:
     """多筆階梯標：低價多張衝便宜成本，高價少張保命中率。"""
     total_lots = max(budget_twd // FACE_VALUE, 1)
@@ -362,13 +381,15 @@ def build_ladder_tickets(
     low = max(floor, bid_low)
     high = max(bid_high, low)
     fair = min(max(fair, low), high)
-    n_tickets = max(n_tickets, 3)
+    # 張數不夠時降筆數，但盡量維持目標筆數（每筆至少 min_lot）
+    n_tickets = max(min(n_tickets, total_lots // max(min_lot, 1)), 1)
+    n_tickets = max(n_tickets, 1)
 
     prices: list[float] = []
     for i in range(n_tickets):
-        t = i / (n_tickets - 1)
+        t = 0.0 if n_tickets == 1 else i / (n_tickets - 1)
         if t <= 0.5:
-            p = low + (fair - low) * (t / 0.5)
+            p = low + (fair - low) * (t / 0.5 if n_tickets > 1 else 0.0)
         else:
             p = fair + (high - fair) * ((t - 0.5) / 0.5)
         prices.append(round(p, 2))
@@ -429,6 +450,7 @@ def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> Posi
         auction_lots=auction.auction_lots,
     )
 
+    n_tickets = tickets_for_tier(tier)
     tickets: list[BidTicket] = []
     if auction.bid_low is not None and auction.bid_high is not None and auction.fair_value is not None:
         tickets = build_ladder_tickets(
@@ -439,6 +461,7 @@ def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> Posi
             fair=auction.fair_value,
             auction_lots=auction.auction_lots,
             min_lot=auction.min_lot or 1,
+            n_tickets=n_tickets,
         )
 
     gross = sum(t.amount_twd for t in tickets) or int(budget * (auction.fair_value or 100) / 100)
@@ -456,7 +479,7 @@ def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> Posi
     rationale = (
         f"市值約 {cap_txt} → {tier_label}股，基準配置 {base / 1e4:.0f} 萬；"
         + ("；".join(reasons) if reasons else "無額外加減碼")
-        + "。採多筆階梯標：低價衝便宜成本、高價保命中率。"
+        + f"。建議 {len(tickets) or n_tickets} 筆階梯標：低價衝便宜成本、高價保命中率。"
     )
     return PositionPlan(
         size_tier=tier,
@@ -743,12 +766,161 @@ def render_text_report(
     return "\n".join(lines)
 
 
-def render_html_report(text: str, alerts: list[AuctionRow]) -> str:
+def _load_font(size: int):
+    from PIL import ImageFont
+
+    for path in FONT_CANDIDATES:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size=size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def render_share_card(auction: AuctionRow, out_path: Path) -> Path:
+    """產生可分享的競拍建議圖卡（手機轉傳友善）。"""
+    from PIL import Image, ImageDraw
+
+    plan = auction.position
+    tickets = plan.tickets if plan else []
+    # 1080 寬度方便手機；高度依標單筆數動態調整
+    width = 1080
+    row_h = 72
+    header_h = 420
+    footer_h = 110
+    height = header_h + max(len(tickets), 1) * row_h + footer_h + 40
+
+    # 深墨藍 + 琥珀強調（避免常見 AI 紫／奶油風）
+    bg = (18, 28, 38)
+    panel = (28, 42, 56)
+    line = (48, 68, 86)
+    text = (236, 240, 244)
+    muted = (156, 172, 188)
+    accent = (242, 169, 59)
+    cheap_c = (72, 187, 156)
+    core_c = (96, 165, 250)
+    insure_c = (248, 113, 113)
+
+    img = Image.new("RGB", (width, height), bg)
+    draw = ImageDraw.Draw(img)
+    font_title = _load_font(54)
+    font_h2 = _load_font(36)
+    font_body = _load_font(30)
+    font_small = _load_font(24)
+    font_tiny = _load_font(20)
+
+    def text_w(s: str, font) -> int:
+        box = draw.textbbox((0, 0), s, font=font)
+        return box[2] - box[0]
+
+    y = 36
+    draw.text((48, y), "可轉債競拍建議", fill=accent, font=font_small)
+    y += 42
+    title = f"{auction.name}  {auction.bond_code}"
+    draw.text((48, y), title, fill=text, font=font_title)
+    y += 70
+    draw.text(
+        (48, y),
+        f"正股 {auction.stock_code or '-'}　投標 {auction.bid_period}　開標 {auction.open_date}",
+        fill=muted,
+        font=font_small,
+    )
+    y += 48
+
+    # 重點數據列
+    metrics = [
+        ("底標", f"{auction.floor_price:.2f}"),
+        ("建議區間", f"{auction.bid_low:.2f}–{auction.bid_high:.2f}" if auction.bid_low else "-"),
+        ("合理價", f"{auction.fair_value:.2f}" if auction.fair_value else "-"),
+        ("部位", f"{(plan.target_budget_twd / 1e4):.0f} 萬" if plan else "-"),
+    ]
+    box_w = (width - 48 * 2 - 18 * 3) // 4
+    for i, (label, value) in enumerate(metrics):
+        x = 48 + i * (box_w + 18)
+        draw.rounded_rectangle((x, y, x + box_w, y + 110), radius=16, fill=panel)
+        draw.text((x + 20, y + 18), label, fill=muted, font=font_tiny)
+        # 縮小過長數值
+        f = font_h2 if text_w(value, font_h2) < box_w - 28 else font_body
+        draw.text((x + 20, y + 52), value, fill=text, font=f)
+    y += 140
+
+    draw.text((48, y), f"階梯標單（共 {len(tickets)} 筆）", fill=text, font=font_h2)
+    y += 50
+
+    role_zh = {"cheap": "便宜倉", "core": "核心倉", "insure": "保險倉"}
+    role_color = {"cheap": cheap_c, "core": core_c, "insure": insure_c}
+    # 表頭
+    draw.rounded_rectangle((48, y, width - 48, y + 44), radius=10, fill=panel)
+    headers = [(70, "#"), (150, "倉位"), (400, "投標價"), (620, "張數"), (820, "金額")]
+    for x, h in headers:
+        draw.text((x, y + 8), h, fill=muted, font=font_small)
+    y += 52
+
+    for i, t in enumerate(tickets, 1):
+        if i % 2 == 1:
+            draw.rounded_rectangle((48, y - 4, width - 48, y + row_h - 10), radius=10, fill=panel)
+        rc = role_color.get(t.role, accent)
+        draw.ellipse((70, y + 18, 86, y + 34), fill=rc)
+        draw.text((100, y + 12), str(i), fill=text, font=font_body)
+        draw.text((150, y + 12), role_zh.get(t.role, t.role), fill=rc, font=font_body)
+        draw.text((400, y + 12), f"{t.price:.2f} 元", fill=text, font=font_body)
+        draw.text((620, y + 12), f"{t.lots} 張", fill=text, font=font_body)
+        draw.text((820, y + 12), f"{t.amount_twd / 1e4:.1f} 萬", fill=text, font=font_body)
+        y += row_h
+
+    y = height - footer_h
+    draw.line((48, y, width - 48, y), fill=line, width=1)
+    y += 16
+    if plan:
+        avg = (
+            sum(t.price * t.lots for t in tickets) / max(sum(t.lots for t in tickets), 1)
+            if tickets
+            else 0
+        )
+        draw.text(
+            (48, y),
+            f"加權均價約 {avg:.2f} 元｜預估保證金約 {plan.deposit_est_twd / 1e4:.0f} 萬｜僅供研究分享",
+            fill=muted,
+            font=font_tiny,
+        )
+        y += 32
+        # 截短理由避免溢出
+        rationale = plan.rationale
+        if len(rationale) > 48:
+            rationale = rationale[:48] + "…"
+        draw.text((48, y), rationale, fill=muted, font=font_tiny)
+    else:
+        draw.text((48, y), "僅供研究分享，不構成投資建議", fill=muted, font=font_tiny)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out_path, format="PNG", optimize=True)
+    return out_path
+
+
+def generate_share_cards(auctions: list[AuctionRow]) -> list[tuple[AuctionRow, Path]]:
+    results: list[tuple[AuctionRow, Path]] = []
+    stamp = datetime.now(TPE).strftime("%Y%m%d_%H%M")
+    for a in auctions:
+        if not a.position or not a.position.tickets:
+            continue
+        path = CARD_DIR / f"cb_{a.bond_code}_{stamp}.png"
+        results.append((a, render_share_card(a, path)))
+    return results
+
+
+def render_html_report(text: str, alerts: list[AuctionRow], card_cids: list[tuple[str, str]] | None = None) -> str:
     parts = [
         "<html><body style='font-family:sans-serif;line-height:1.5;color:#111;'>",
         "<h2>可轉債競拍監控報告</h2>",
         f"<p>產生時間：{escape(datetime.now(TPE).strftime('%Y-%m-%d %H:%M'))} (Asia/Taipei)</p>",
+        "<p>下方附上可分享圖卡（也可直接轉傳附件 PNG）。</p>",
     ]
+    if card_cids:
+        parts.append("<h3>分享圖卡</h3>")
+        for cid, label in card_cids:
+            parts.append(f"<p><b>{escape(label)}</b><br>")
+            parts.append(f"<img src='cid:{cid}' alt='{escape(label)}' style='max-width:100%;border-radius:12px;'/></p>")
     if alerts:
         parts.append("<h3>需關注標的</h3>")
         for a in alerts:
@@ -773,17 +945,43 @@ def render_html_report(text: str, alerts: list[AuctionRow]) -> str:
     return "".join(parts)
 
 
-def send_email(subject: str, text: str, html: str) -> None:
+def send_email(
+    subject: str,
+    text: str,
+    html: str,
+    card_paths: list[Path] | None = None,
+) -> None:
     email = os.environ.get("UANALYZE_EMAIL") or os.environ.get("CB_ALERT_EMAIL")
     password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "")
     if not email or not password:
         raise RuntimeError("缺少 UANALYZE_EMAIL / GMAIL_APP_PASSWORD，無法寄送 Email")
-    msg = MIMEMultipart("alternative")
+
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = email
     msg["To"] = email
-    msg.attach(MIMEText(text, "plain", "utf-8"))
-    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(text, "plain", "utf-8"))
+
+    related = MIMEMultipart("related")
+    related.attach(MIMEText(html, "html", "utf-8"))
+    for path in card_paths or []:
+        with path.open("rb") as f:
+            img = MIMEImage(f.read(), _subtype="png")
+        img.add_header("Content-ID", f"<{path.stem}>")
+        img.add_header("Content-Disposition", "inline", filename=path.name)
+        related.attach(img)
+    alt.attach(related)
+    msg.attach(alt)
+
+    # 再附一份 attachment，方便手機另存／轉傳
+    for path in card_paths or []:
+        with path.open("rb") as f:
+            att = MIMEImage(f.read(), _subtype="png")
+        att.add_header("Content-Disposition", "attachment", filename=path.name)
+        msg.attach(att)
+
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(email, password)
         smtp.sendmail(email, [email], msg.as_string())
@@ -820,8 +1018,17 @@ def run(args: argparse.Namespace) -> int:
     active = [a for a in today_rows if a.status in ("bidding", "upcoming", "awaiting_result")]
     state = load_state()
     alerts, reasons = detect_alerts(today_rows, state)
-    report = render_text_report(alerts if alerts else active[:3], active, reasons)
+    focus = alerts if alerts else active[:3]
+    report = render_text_report(focus, active, reasons)
     print(report)
+
+    # 產生可分享圖卡（dry-run 也會產出，方便檢查）
+    card_pairs = generate_share_cards(focus)
+    card_paths = [p for _, p in card_pairs]
+    if card_paths:
+        print("\n已產生分享圖卡：")
+        for p in card_paths:
+            print(f"  - {p}")
 
     should_notify = args.force_notify or (args.notify and bool(alerts))
     if should_notify and not args.dry_run:
@@ -830,8 +1037,10 @@ def run(args: argparse.Namespace) -> int:
             subject += f" {alerts[0].name} 等 {len(alerts)} 檔需關注"
         else:
             subject += " 監控摘要"
-        send_email(subject, report, render_html_report(report, alerts or active[:3]))
-        print(f"\n已寄送 Email 至 {os.environ.get('UANALYZE_EMAIL')}")
+        card_cids = [(p.stem, f"{a.name} ({a.bond_code})") for a, p in card_pairs]
+        html = render_html_report(report, focus, card_cids=card_cids)
+        send_email(subject, report, html, card_paths=card_paths)
+        print(f"\n已寄送 Email（含圖卡）至 {os.environ.get('UANALYZE_EMAIL')}")
 
     if not args.dry_run:
         save_state(
