@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Monitor Taiwan CB auction announcements and suggest bid ranges.
+"""Monitor Taiwan CB auctions; suggest bid ladders and market-cap sizing.
 
-Data sources:
-- Auction list: money-link imp09_tw JSON API
-- CB terms (conversion price, premium): cyclesinvest cbipo table
-- Stock price: TWSE/TPEx daily close via TWSE open API
-- Bond terms (putback, coupon): money-link bnd001_tw when listed
+Sources:
+- Auction list: money-link imp09_tw
+- CB terms: cyclesinvest cbipo
+- Stock close: TWSE STOCK_DAY
+- Shares outstanding: TWSE / TPEx open data
 
-Notification uses Gmail (UANALYZE_EMAIL + GMAIL_APP_PASSWORD secrets).
+Email: UANALYZE_EMAIL + GMAIL_APP_PASSWORD
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -32,11 +32,34 @@ from typing import Any
 TPE = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
 STATE_PATH = Path(os.getenv("CB_AUCTION_STATE_PATH", ROOT / ".data" / "cb_auction_state.json"))
-MONEY_LINK_AUCTION = "https://www.money-link.com.tw/p/?G=m&pg=imp09_tw&id="
-MONEY_LINK_BOND = "https://www.money-link.com.tw/p/?G=m&pg=bnd001_tw&id={stock}"
-CYCLES_CB_IPO = "https://www.cyclesinvest.com/cbipo.php"
-TWSE_DAY = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={date}&stockNo={stock}&response=json"
-USER_AGENT = "Mozilla/5.0 (compatible; cb-auction-monitor/1.0)"
+
+AUCTION_URL = "https://www.money-link.com.tw/p/?G=m&pg=imp09_tw&id="
+BOND_URL = "https://www.money-link.com.tw/p/?G=m&pg=bnd001_tw&id={stock}"
+CB_IPO_URL = "https://www.cyclesinvest.com/cbipo.php"
+TWSE_COMPANY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+TPEX_COMPANY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
+USER_AGENT = "Mozilla/5.0 (compatible; cb-auction-monitor/1.1)"
+
+FACE_VALUE = 100_000  # 每張面額 10 萬
+N_TICKETS = 5
+
+
+@dataclass
+class BidTicket:
+    price: float
+    lots: int
+    amount_twd: int
+    role: str  # cheap / core / insure
+
+
+@dataclass
+class PositionPlan:
+    size_tier: str
+    market_cap_yi: float | None
+    target_budget_twd: int
+    deposit_est_twd: int
+    tickets: list[BidTicket] = field(default_factory=list)
+    rationale: str = ""
 
 
 @dataclass
@@ -77,20 +100,22 @@ class AuctionRow:
     meta: CbIpoMeta | None = None
     stock_price: float | None = None
     parity: float | None = None
+    conversion_price: float | None = None
     bid_low: float | None = None
     bid_high: float | None = None
     fair_value: float | None = None
     advice: str = ""
     notes: list[str] = field(default_factory=list)
+    position: PositionPlan | None = None
 
 
-def http_get_json(url: str, timeout: int = 30) -> dict[str, Any]:
+def http_json(url: str, timeout: int = 30) -> Any:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode())
 
 
-def http_get_text(url: str, timeout: int = 30) -> str:
+def http_text(url: str, timeout: int = 30) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
@@ -109,18 +134,16 @@ def fmt_date(ts: int | None) -> str:
 
 def infer_stock_code(bond_code: str) -> str:
     digits = re.sub(r"\D", "", bond_code)
-    if len(digits) >= 4:
-        return digits[:4]
-    return digits
+    return digits[:4] if len(digits) >= 4 else digits
 
 
 def fetch_auctions() -> list[dict[str, Any]]:
-    data = http_get_json(MONEY_LINK_AUCTION)
+    data = http_json(AUCTION_URL)
     return list(data.get("result", {}).get("d1") or [])
 
 
 def fetch_cb_ipo_table() -> dict[str, CbIpoMeta]:
-    html = http_get_text(CYCLES_CB_IPO)
+    html = http_text(CB_IPO_URL)
     rows: dict[str, CbIpoMeta] = {}
     for row_html in re.findall(r"<tr[^>]*>.*?</tr>", html, re.S):
         texts = [t.strip() for t in re.findall(r">([^<]+)<", row_html) if t.strip()]
@@ -129,8 +152,7 @@ def fetch_cb_ipo_table() -> dict[str, CbIpoMeta]:
         if not re.fullmatch(r"\d{4,5}", texts[2]) or not re.fullmatch(r"\d{4,5}", texts[3]):
             continue
         stock, bond, name = texts[2], texts[3], texts[4]
-        tcri_col = texts[5]
-        tcri_parts = tcri_col.split("/")
+        tcri_parts = texts[5].split("/")
         premium = None
         conv = None
         try:
@@ -163,7 +185,11 @@ def fetch_cb_ipo_table() -> dict[str, CbIpoMeta]:
     return rows
 
 
-def fetch_stock_close(stock_code: str, as_of: date | None = None, cache: dict[str, float | None] | None = None) -> float | None:
+def fetch_stock_close(
+    stock_code: str,
+    as_of: date | None = None,
+    cache: dict[str, float | None] | None = None,
+) -> float | None:
     if cache is not None and stock_code in cache:
         return cache[stock_code]
     as_of = as_of or datetime.now(TPE).date()
@@ -179,13 +205,13 @@ def fetch_stock_close(stock_code: str, as_of: date | None = None, cache: dict[st
         })
         url = f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?{q}"
         try:
-            data = http_get_json(url)
+            data = http_json(url)
         except (urllib.error.URLError, json.JSONDecodeError):
             continue
         if data.get("stat") != "OK" or not data.get("data"):
             continue
         fields = data.get("fields") or []
-        close_idx = fields.index("收盤價") if "收盤價" in fields else 6 if len(fields) > 6 else 1
+        close_idx = fields.index("收盤價") if "收盤價" in fields else 6
         for row in reversed(data["data"]):
             if len(row) <= close_idx or row[0] == "月平均收盤價":
                 continue
@@ -201,9 +227,250 @@ def fetch_stock_close(stock_code: str, as_of: date | None = None, cache: dict[st
     return price
 
 
+def load_shares_outstanding() -> dict[str, int]:
+    out: dict[str, int] = {}
+    try:
+        for row in http_json(TWSE_COMPANY_URL):
+            code = str(row.get("公司代號") or "").strip()
+            shares = str(row.get("已發行普通股數或TDR原股發行股數") or "0").replace(",", "")
+            if code and shares.isdigit():
+                out[code] = int(shares)
+    except (urllib.error.URLError, json.JSONDecodeError, TypeError):
+        pass
+    try:
+        for row in http_json(TPEX_COMPANY_URL):
+            code = str(row.get("SecuritiesCompanyCode") or "").strip()
+            shares = str(row.get("IssueShares") or "0").replace(",", "")
+            if code and shares.isdigit():
+                out[code] = int(shares)
+    except (urllib.error.URLError, json.JSONDecodeError, TypeError):
+        pass
+    return out
+
+
+def market_cap_yi(stock_code: str, price: float | None, shares_map: dict[str, int]) -> float | None:
+    if not price or stock_code not in shares_map:
+        return None
+    return round(shares_map[stock_code] * price / 1e8, 2)
+
+
+def parse_tcri(meta: CbIpoMeta | None) -> int | None:
+    if not meta or not meta.tcri:
+        return None
+    m = re.search(r"(\d+)", meta.tcri)
+    return int(m.group(1)) if m else None
+
+
+def classify_size_tier(cap_yi: float | None) -> str:
+    if cap_yi is None:
+        return "unknown"
+    if cap_yi >= 2000:
+        return "mega"
+    if cap_yi >= 500:
+        return "large"
+    if cap_yi >= 100:
+        return "mid"
+    if cap_yi >= 30:
+        return "small"
+    return "micro"
+
+
+def base_budget_for_tier(tier: str) -> int:
+    # 依市值分級的基準配置（新台幣）
+    return {
+        "mega": 10_000_000,  # 1000 萬
+        "large": 5_000_000,  # 500 萬
+        "mid": 2_500_000,    # 250 萬
+        "small": 1_500_000,  # 150 萬
+        "micro": 800_000,    # 80 萬
+        "unknown": 1_500_000,
+    }[tier]
+
+
+def adjust_budget(
+    base: int,
+    *,
+    tcri: int | None,
+    collateral: str,
+    parity: float | None,
+    issue_amount_100m: float | None,
+    auction_lots: int | None,
+) -> tuple[int, list[str]]:
+    reasons: list[str] = []
+    budget = float(base)
+
+    if tcri is not None:
+        if tcri <= 4:
+            budget *= 1.15
+            reasons.append(f"TCRI {tcri} 較佳，部位略增")
+        elif tcri >= 7:
+            budget *= 0.65
+            reasons.append(f"TCRI {tcri} 偏弱，部位下修控風險")
+        elif tcri == 6:
+            budget *= 0.85
+            reasons.append(f"TCRI {tcri} 中性偏弱，部位略減")
+
+    if collateral and "無" not in collateral:
+        budget *= 1.10
+        reasons.append(f"有擔保（{collateral}），部位略增")
+    elif collateral and "無" in collateral:
+        reasons.append("無擔保，維持信用風險折扣")
+
+    if parity is not None:
+        if parity >= 100:
+            budget *= 1.10
+            reasons.append(f"價內（parity {parity:.1f}%），轉股價值支撐較強")
+        elif parity < 85:
+            budget *= 0.80
+            reasons.append(f"深價外（parity {parity:.1f}%），以債性為主、縮小部位")
+
+    if issue_amount_100m is not None:
+        issue_twd = issue_amount_100m * 100_000_000
+        cap_by_issue = issue_twd * 0.03
+        if budget > cap_by_issue:
+            budget = cap_by_issue
+            reasons.append(f"受發行量限制，上限約 {cap_by_issue / 1e4:.0f} 萬")
+
+    if auction_lots:
+        # 單一帳戶粗估不超過競拍量 20%；單筆標單法規上限 10%
+        max_total_lots = max(auction_lots // 5, 1)
+        max_by_lots = max_total_lots * FACE_VALUE
+        if budget > max_by_lots:
+            budget = max_by_lots
+            reasons.append(f"受競拍張數限制，上限約 {max_by_lots / 1e4:.0f} 萬")
+
+    budget_i = int(max(round(budget / FACE_VALUE) * FACE_VALUE, FACE_VALUE))
+    return budget_i, reasons
+
+
+def build_ladder_tickets(
+    *,
+    budget_twd: int,
+    floor: float,
+    bid_low: float,
+    bid_high: float,
+    fair: float,
+    auction_lots: int | None,
+    min_lot: int,
+    n_tickets: int = N_TICKETS,
+) -> list[BidTicket]:
+    """多筆階梯標：低價多張衝便宜成本，高價少張保命中率。"""
+    total_lots = max(budget_twd // FACE_VALUE, 1)
+    max_per_ticket = max(int(auction_lots * 0.10), min_lot) if auction_lots else total_lots
+    max_per_ticket = max(max_per_ticket, min_lot)
+
+    low = max(floor, bid_low)
+    high = max(bid_high, low)
+    fair = min(max(fair, low), high)
+    n_tickets = max(n_tickets, 3)
+
+    prices: list[float] = []
+    for i in range(n_tickets):
+        t = i / (n_tickets - 1)
+        if t <= 0.5:
+            p = low + (fair - low) * (t / 0.5)
+        else:
+            p = fair + (high - fair) * ((t - 0.5) / 0.5)
+        prices.append(round(p, 2))
+
+    # 權重：便宜檔較重（例 5 檔：5/4/3/2/1）
+    raw_weights = [n_tickets - i for i in range(n_tickets)]
+    weight_sum = sum(raw_weights)
+    lots_list = [max(int(total_lots * w / weight_sum), 0) for w in raw_weights]
+    leftover = total_lots - sum(lots_list)
+    if leftover > 0:
+        lots_list[0] += leftover
+
+    for i in range(n_tickets):
+        if lots_list[i] == 0 and total_lots >= min_lot * (i + 1):
+            donor = max(range(n_tickets), key=lambda j: lots_list[j])
+            if lots_list[donor] > min_lot:
+                lots_list[donor] -= min_lot
+                lots_list[i] += min_lot
+
+    tickets: list[BidTicket] = []
+    for i, (price, lots) in enumerate(zip(prices, lots_list)):
+        if lots <= 0:
+            continue
+        lots = min(lots, max_per_ticket)
+        if lots < min_lot:
+            continue
+        if i == 0:
+            role = "cheap"
+        elif i >= n_tickets - 1:
+            role = "insure"
+        else:
+            role = "core"
+        tickets.append(
+            BidTicket(
+                price=price,
+                lots=lots,
+                amount_twd=int(lots * FACE_VALUE * price / 100),
+                role=role,
+            )
+        )
+    return tickets
+
+
+def build_position_plan(auction: AuctionRow, shares_map: dict[str, int]) -> PositionPlan:
+    cap = market_cap_yi(auction.stock_code, auction.stock_price, shares_map)
+    tier = classify_size_tier(cap)
+    base = base_budget_for_tier(tier)
+    tcri = parse_tcri(auction.meta)
+    collateral = auction.meta.collateral if auction.meta else ""
+    issue_amt = auction.meta.issue_amount_100m if auction.meta else None
+
+    budget, reasons = adjust_budget(
+        base,
+        tcri=tcri,
+        collateral=collateral,
+        parity=auction.parity,
+        issue_amount_100m=issue_amt,
+        auction_lots=auction.auction_lots,
+    )
+
+    tickets: list[BidTicket] = []
+    if auction.bid_low is not None and auction.bid_high is not None and auction.fair_value is not None:
+        tickets = build_ladder_tickets(
+            budget_twd=budget,
+            floor=auction.floor_price,
+            bid_low=auction.bid_low,
+            bid_high=auction.bid_high,
+            fair=auction.fair_value,
+            auction_lots=auction.auction_lots,
+            min_lot=auction.min_lot or 1,
+        )
+
+    gross = sum(t.amount_twd for t in tickets) or int(budget * (auction.fair_value or 100) / 100)
+    deposit = int(gross * 0.5)
+
+    cap_txt = f"{cap:.0f} 億" if cap is not None else "未知"
+    tier_label = {
+        "mega": "超大型",
+        "large": "大型",
+        "mid": "中型",
+        "small": "小型",
+        "micro": "微型",
+        "unknown": "未知",
+    }[tier]
+    rationale = (
+        f"市值約 {cap_txt} → {tier_label}股，基準配置 {base / 1e4:.0f} 萬；"
+        + ("；".join(reasons) if reasons else "無額外加減碼")
+        + "。採多筆階梯標：低價衝便宜成本、高價保命中率。"
+    )
+    return PositionPlan(
+        size_tier=tier,
+        market_cap_yi=cap,
+        target_budget_twd=budget,
+        deposit_est_twd=deposit,
+        tickets=tickets,
+        rationale=rationale,
+    )
+
+
 def fetch_bond_terms(stock_code: str, bond_code: str) -> dict[str, Any]:
     try:
-        data = http_get_json(MONEY_LINK_BOND.format(stock=stock_code))
+        data = http_json(BOND_URL.format(stock=stock_code))
     except urllib.error.URLError:
         return {}
     for row in data.get("result", {}).get("d1") or []:
@@ -279,10 +546,7 @@ def analyze_bid_range(
         notes.append(f"賣回價 {putback:.2f} 元，可視為軟性下限參考。")
         low = max(low, min(putback, floor * 1.01))
 
-    low = round(low, 2)
-    high = round(max(high, low), 2)
-    fair = round(fair, 2)
-    return low, high, fair, advice, notes
+    return round(low, 2), round(max(high, low), 2), round(fair, 2), advice, notes
 
 
 def normalize_auction(
@@ -294,11 +558,12 @@ def normalize_auction(
     enrich: bool = True,
     stock_cache: dict[str, float | None] | None = None,
     bond_cache: dict[tuple[str, str], dict[str, Any]] | None = None,
+    shares_map: dict[str, int] | None = None,
 ) -> AuctionRow:
     bond_code = str(row.get("v3", ""))
     stock_code = infer_stock_code(bond_code)
     meta = ipo_map.get(bond_code)
-    if meta and not stock_code:
+    if meta and meta.stock_code:
         stock_code = meta.stock_code
 
     floor = float(row.get("v9") or 0)
@@ -324,39 +589,46 @@ def normalize_auction(
         meta=meta,
     )
 
-    if enrich:
-        conversion = meta.conversion_price if meta and meta.conversion_price else None
-        putback = None
-        if stock_code:
-            cache_key = (stock_code, bond_code)
-            bond_terms = {}
-            if bond_cache is not None and cache_key in bond_cache:
-                bond_terms = bond_cache[cache_key]
-            else:
-                bond_terms = fetch_bond_terms(stock_code, bond_code)
-                if bond_cache is not None:
-                    bond_cache[cache_key] = bond_terms
-            if bond_terms.get("v28"):
-                conversion = float(bond_terms["v28"])
-            if bond_terms.get("v31"):
-                putback = float(bond_terms["v31"])
+    if not enrich:
+        return auction
 
-            auction.stock_price = fetch_stock_close(stock_code, today, stock_cache)
-        if auction.stock_price and conversion:
-            auction.parity = round(auction.stock_price / conversion * 100, 2)
+    conversion = meta.conversion_price if meta and meta.conversion_price else None
+    putback = None
+    if stock_code:
+        cache_key = (stock_code, bond_code)
+        if bond_cache is not None and cache_key in bond_cache:
+            bond_terms = bond_cache[cache_key]
+        else:
+            bond_terms = fetch_bond_terms(stock_code, bond_code)
+            if bond_cache is not None:
+                bond_cache[cache_key] = bond_terms
+        if bond_terms.get("v28"):
+            conversion = float(bond_terms["v28"])
+        if bond_terms.get("v31"):
+            putback = float(bond_terms["v31"])
+        auction.stock_price = fetch_stock_close(stock_code, today, stock_cache)
 
-        low, high, fair, advice, notes = analyze_bid_range(floor, auction.parity, premium_stats, putback)
-        auction.bid_low = low
-        auction.bid_high = high
-        auction.fair_value = fair
-        auction.advice = advice
-        auction.notes = notes
-        if meta and meta.premium_pct is not None:
-            auction.notes.append(f"公告轉換溢價率 {meta.premium_pct:.2f}%")
-        if conversion:
-            auction.notes.insert(0, f"轉換價 {conversion:.2f} 元")
-        if auction.stock_price:
-            auction.notes.insert(0, f"正股 {stock_code} 最近收盤 {auction.stock_price:.2f} 元")
+    auction.conversion_price = conversion
+    if auction.stock_price and conversion:
+        auction.parity = round(auction.stock_price / conversion * 100, 2)
+
+    low, high, fair, advice, notes = analyze_bid_range(
+        floor, auction.parity, premium_stats, putback
+    )
+    auction.bid_low = low
+    auction.bid_high = high
+    auction.fair_value = fair
+    auction.advice = advice
+    auction.notes = notes
+    if meta and meta.premium_pct is not None:
+        auction.notes.append(f"公告轉換溢價率 {meta.premium_pct:.2f}%")
+    if conversion:
+        auction.notes.insert(0, f"轉換價 {conversion:.2f} 元")
+    if auction.stock_price:
+        auction.notes.insert(0, f"正股 {stock_code} 最近收盤 {auction.stock_price:.2f} 元")
+
+    if shares_map is not None:
+        auction.position = build_position_plan(auction, shares_map)
     return auction
 
 
@@ -371,11 +643,9 @@ def save_state(state: dict[str, Any]) -> None:
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def auction_snapshot_key(a: AuctionRow) -> str:
-    return a.bond_code
-
-
-def detect_alerts(current: list[AuctionRow], previous: dict[str, Any]) -> tuple[list[AuctionRow], list[str]]:
+def detect_alerts(
+    current: list[AuctionRow], previous: dict[str, Any]
+) -> tuple[list[AuctionRow], list[str]]:
     alerts: list[AuctionRow] = []
     reasons: list[str] = []
     prev_map = previous.get("auctions", {})
@@ -384,13 +654,16 @@ def detect_alerts(current: list[AuctionRow], previous: dict[str, Any]) -> tuple[
             continue
         if item.status in ("cancelled", "completed", "past"):
             continue
-        key = auction_snapshot_key(item)
-        prev = prev_map.get(key)
+        prev = prev_map.get(item.bond_code)
         if prev is None:
             alerts.append(item)
             reasons.append(f"新標的：{item.name} ({item.bond_code})")
             continue
-        if prev.get("status") != item.status and item.status in ("bidding", "upcoming", "awaiting_result"):
+        if prev.get("status") != item.status and item.status in (
+            "bidding",
+            "upcoming",
+            "awaiting_result",
+        ):
             alerts.append(item)
             reasons.append(f"狀態變更：{item.name} {prev.get('status')} -> {item.status}")
         elif item.status == "bidding" and (
@@ -401,7 +674,50 @@ def detect_alerts(current: list[AuctionRow], previous: dict[str, Any]) -> tuple[
     return alerts, reasons
 
 
-def render_text_report(alerts: list[AuctionRow], all_active: list[AuctionRow], reasons: list[str]) -> str:
+def format_tickets(plan: PositionPlan) -> list[str]:
+    lines = [
+        f"  部位建議：{plan.target_budget_twd / 1e4:.0f} 萬（市值部位）"
+        f" | 預估保證金約 {plan.deposit_est_twd / 1e4:.0f} 萬",
+        f"  配置理由：{plan.rationale}",
+    ]
+    if plan.tickets:
+        lines.append("  建議標單（階梯）：")
+        role_zh = {"cheap": "便宜倉", "core": "核心倉", "insure": "保險倉"}
+        for i, t in enumerate(plan.tickets, 1):
+            lines.append(
+                f"    #{i} {role_zh.get(t.role, t.role)}：{t.price:.2f} 元 × {t.lots} 張"
+                f"（約 {t.amount_twd / 1e4:.1f} 萬）"
+            )
+        avg = sum(t.price * t.lots for t in plan.tickets) / max(
+            sum(t.lots for t in plan.tickets), 1
+        )
+        lines.append(
+            f"  加權平均投標價約 {avg:.2f} 元；低價多張拉低成本，高價少張提高命中率。"
+        )
+    return lines
+
+
+def format_auction_lines(a: AuctionRow) -> list[str]:
+    lines = [
+        f"{a.name} ({a.bond_code}) / 正股 {a.stock_code or '-'} / 狀態 {a.status}",
+        f"  投標期間：{a.bid_period} | 開標：{a.open_date} | 底標：{a.floor_price:.2f}",
+    ]
+    if a.bid_low is not None and a.bid_high is not None and a.fair_value is not None:
+        lines.append(
+            f"  建議投標區間：{a.bid_low:.2f} ~ {a.bid_high:.2f} 元"
+            f" | 合理價參考：{a.fair_value:.2f} 元"
+        )
+    if a.advice:
+        lines.append(f"  建議：{a.advice}")
+    lines.extend(f"  - {n}" for n in a.notes)
+    if a.position:
+        lines.extend(format_tickets(a.position))
+    return lines
+
+
+def render_text_report(
+    alerts: list[AuctionRow], all_active: list[AuctionRow], reasons: list[str]
+) -> str:
     lines = [
         "可轉債競拍監控報告",
         f"產生時間：{datetime.now(TPE):%Y-%m-%d %H:%M} (Asia/Taipei)",
@@ -427,16 +743,6 @@ def render_text_report(alerts: list[AuctionRow], all_active: list[AuctionRow], r
     return "\n".join(lines)
 
 
-def format_auction_lines(a: AuctionRow) -> list[str]:
-    return [
-        f"{a.name} ({a.bond_code}) / 正股 {a.stock_code or '-'} / 狀態 {a.status}",
-        f"  投標期間：{a.bid_period} | 開標：{a.open_date} | 底標：{a.floor_price:.2f}",
-        f"  建議投標區間：{a.bid_low:.2f} ~ {a.bid_high:.2f} 元 | 合理價參考：{a.fair_value:.2f} 元",
-        f"  建議：{a.advice}",
-        *(f"  - {n}" for n in a.notes),
-    ]
-
-
 def render_html_report(text: str, alerts: list[AuctionRow]) -> str:
     parts = [
         "<html><body style='font-family:sans-serif;line-height:1.5;color:#111;'>",
@@ -446,15 +752,24 @@ def render_html_report(text: str, alerts: list[AuctionRow]) -> str:
     if alerts:
         parts.append("<h3>需關注標的</h3>")
         for a in alerts:
-            parts.append("<div style='border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0;'>")
-            parts.append(f"<h4 style='margin:0 0 8px;'>{escape(a.name)} ({escape(a.bond_code)})</h4>")
+            parts.append(
+                "<div style='border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0;'>"
+            )
+            parts.append(
+                f"<h4 style='margin:0 0 8px;'>{escape(a.name)} ({escape(a.bond_code)})</h4>"
+            )
             parts.append("<ul style='margin:0;padding-left:18px;'>")
             for line in format_auction_lines(a)[1:]:
                 parts.append(f"<li>{escape(line.strip())}</li>")
             parts.append("</ul></div>")
-    parts.append("<pre style='background:#f7f7f7;padding:12px;border-radius:8px;white-space:pre-wrap;'>")
+    parts.append(
+        "<pre style='background:#f7f7f7;padding:12px;border-radius:8px;white-space:pre-wrap;'>"
+    )
     parts.append(escape(text))
-    parts.append("</pre><p style='color:#666;font-size:12px;'>本報告僅供研究參考，不構成投資建議。</p></body></html>")
+    parts.append(
+        "</pre><p style='color:#666;font-size:12px;'>本報告僅供研究參考，不構成投資建議。</p>"
+        "</body></html>"
+    )
     return "".join(parts)
 
 
@@ -474,18 +789,12 @@ def send_email(subject: str, text: str, html: str) -> None:
         smtp.sendmail(email, [email], msg.as_string())
 
 
-def serialize_auction(a: AuctionRow) -> dict[str, Any]:
-    data = asdict(a)
-    if a.meta:
-        data["meta"] = asdict(a.meta)
-    return data
-
-
 def run(args: argparse.Namespace) -> int:
     today = datetime.now(TPE).date()
     raw = fetch_auctions()
     ipo_map = fetch_cb_ipo_table()
     premium_stats = historical_premium_stats(raw)
+    shares_map = load_shares_outstanding()
 
     stock_cache: dict[str, float | None] = {}
     bond_cache: dict[tuple[str, str], dict[str, Any]] = {}
@@ -497,15 +806,20 @@ def run(args: argparse.Namespace) -> int:
         enrich = basic.status in ("bidding", "upcoming", "awaiting_result")
         today_rows.append(
             normalize_auction(
-                row, ipo_map, premium_stats, today,
-                enrich=enrich, stock_cache=stock_cache, bond_cache=bond_cache,
+                row,
+                ipo_map,
+                premium_stats,
+                today,
+                enrich=enrich,
+                stock_cache=stock_cache,
+                bond_cache=bond_cache,
+                shares_map=shares_map if enrich else None,
             )
         )
-    auctions = today_rows
-    active = [a for a in auctions if a.status in ("bidding", "upcoming", "awaiting_result")]
 
+    active = [a for a in today_rows if a.status in ("bidding", "upcoming", "awaiting_result")]
     state = load_state()
-    alerts, reasons = detect_alerts(auctions, state)
+    alerts, reasons = detect_alerts(today_rows, state)
     report = render_text_report(alerts if alerts else active[:3], active, reasons)
     print(report)
 
@@ -519,19 +833,20 @@ def run(args: argparse.Namespace) -> int:
         send_email(subject, report, render_html_report(report, alerts or active[:3]))
         print(f"\n已寄送 Email 至 {os.environ.get('UANALYZE_EMAIL')}")
 
-    new_state = {
-        "last_run": datetime.now(TPE).isoformat(),
-        "auctions": {auction_snapshot_key(a): serialize_auction(a) for a in auctions},
-    }
     if not args.dry_run:
-        save_state(new_state)
+        save_state(
+            {
+                "last_run": datetime.now(TPE).isoformat(),
+                "auctions": {a.bond_code: asdict(a) for a in today_rows},
+            }
+        )
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Monitor Taiwan CB auctions")
     parser.add_argument("--dry-run", action="store_true", help="不寫入 state、不寄信")
-    parser.add_argument("--notify", action="store_true", help="有異動才寄信（預設僅在偵測到異動時）")
+    parser.add_argument("--notify", action="store_true", help="有異動才寄信")
     parser.add_argument("--force-notify", action="store_true", help="無論是否有異動都寄信")
     args = parser.parse_args()
     if args.force_notify:
