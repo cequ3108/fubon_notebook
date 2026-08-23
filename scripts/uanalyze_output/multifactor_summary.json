@@ -1,0 +1,461 @@
+{
+  "window": {
+    "start": "2020-02-04",
+    "end": "2026-08-03"
+  },
+  "descriptions": {
+    "A_baseline_cap": "ROIC>15% + 市值加權（原版）",
+    "B_cap_max10": "ROIC>15% + 市值加權 + 單檔上限10%",
+    "C_equal_weight": "ROIC>15% + 等權",
+    "D_mom_filter_cap10": "ROIC>15% + 12個月動能>0 + 上限10%",
+    "E_trend_ma200_cap10": "ROIC>15% + 站上200日均線 + 上限10%",
+    "F_ex_cyclical_cap10": "ROIC>15% + 排除景氣循環/金融 + 上限10%",
+    "G_roic_stable_cap10": "ROIC>15%（今年與一年前皆達標）+ 上限10%",
+    "H_quality_value_eq": "ROIC>15% 中 P/B 較便宜一半 + 等權",
+    "I_roic_mom_score_top40": "ROIC與動能綜合評分前40 + 等權",
+    "J_combo_stable_mom_cap10": "穩定ROIC + 動能 + 排除循環股 + 上限10%",
+    "K_roic_mom_top20": "ROIC×動能評分前20 + 等權（集中）",
+    "L_top20_halfcash_ma200": "評分前20等權 + 0050跌破200MA時改50%現金"
+  },
+  "ranking_by_calmar": [
+    {
+      "variant": "L_top20_halfcash_ma200",
+      "cagr": 45.66,
+      "max_dd": -30.81,
+      "sharpe": 1.63,
+      "calmar": 1.48,
+      "vol": 26.04,
+      "avg_n": 20.0,
+      "avg_max_w": 5.0,
+      "avg_invested": 91.7,
+      "ir": 0.68
+    },
+    {
+      "variant": "K_roic_mom_top20",
+      "cagr": 46.34,
+      "max_dd": -34.67,
+      "sharpe": 1.49,
+      "calmar": 1.34,
+      "vol": 29.35,
+      "avg_n": 20.0,
+      "avg_max_w": 5.0,
+      "avg_invested": 100.0,
+      "ir": 0.68
+    },
+    {
+      "variant": "I_roic_mom_score_top40",
+      "cagr": 34.94,
+      "max_dd": -33.82,
+      "sharpe": 1.34,
+      "calmar": 1.03,
+      "vol": 25.68,
+      "avg_n": 40.0,
+      "avg_max_w": 2.5,
+      "avg_invested": 100.0,
+      "ir": 0.29
+    },
+    {
+      "variant": "C_equal_weight",
+      "cagr": 30.51,
+      "max_dd": -32.19,
+      "sharpe": 1.31,
+      "calmar": 0.95,
+      "vol": 23.15,
+      "avg_n": 84.6,
+      "avg_max_w": 1.2,
+      "avg_invested": 100.0,
+      "ir": 0.06
+    },
+    {
+      "variant": "H_quality_value_eq",
+      "cagr": 29.02,
+      "max_dd": -30.82,
+      "sharpe": 1.36,
+      "calmar": 0.94,
+      "vol": 21.13,
+      "avg_n": 42.1,
+      "avg_max_w": 2.5,
+      "avg_invested": 100.0,
+      "ir": -0.05
+    },
+    {
+      "variant": "D_mom_filter_cap10",
+      "cagr": 31.08,
+      "max_dd": -32.92,
+      "sharpe": 1.22,
+      "calmar": 0.94,
+      "vol": 25.69,
+      "avg_n": 61.1,
+      "avg_max_w": 10.0,
+      "avg_invested": 100.0,
+      "ir": 0.14
+    },
+    {
+      "variant": "A_baseline_cap",
+      "cagr": 35.79,
+      "max_dd": -39.0,
+      "sharpe": 1.31,
+      "calmar": 0.92,
+      "vol": 26.95,
+      "avg_n": 84.6,
+      "avg_max_w": 65.7,
+      "avg_invested": 100.0,
+      "ir": 0.72
+    },
+    {
+      "variant": "J_combo_stable_mom_cap10",
+      "cagr": 32.51,
+      "max_dd": -35.8,
+      "sharpe": 1.25,
+      "calmar": 0.91,
+      "vol": 26.06,
+      "avg_n": 43.4,
+      "avg_max_w": 10.0,
+      "avg_invested": 100.0,
+      "ir": 0.23
+    },
+    {
+      "variant": "E_trend_ma200_cap10",
+      "cagr": 29.51,
+      "max_dd": -33.92,
+      "sharpe": 1.17,
+      "calmar": 0.87,
+      "vol": 25.65,
+      "avg_n": 56.0,
+      "avg_max_w": 10.0,
+      "avg_invested": 100.0,
+      "ir": 0.05
+    },
+    {
+      "variant": "B_cap_max10",
+      "cagr": 28.25,
+      "max_dd": -34.54,
+      "sharpe": 1.15,
+      "calmar": 0.82,
+      "vol": 25.15,
+      "avg_n": 84.6,
+      "avg_max_w": 10.0,
+      "avg_invested": 100.0,
+      "ir": -0.04
+    },
+    {
+      "variant": "G_roic_stable_cap10",
+      "cagr": 28.01,
+      "max_dd": -34.45,
+      "sharpe": 1.14,
+      "calmar": 0.81,
+      "vol": 25.2,
+      "avg_n": 62.9,
+      "avg_max_w": 10.0,
+      "avg_invested": 100.0,
+      "ir": -0.06
+    },
+    {
+      "variant": "F_ex_cyclical_cap10",
+      "cagr": 28.34,
+      "max_dd": -35.88,
+      "sharpe": 1.14,
+      "calmar": 0.79,
+      "vol": 25.52,
+      "avg_n": 79.7,
+      "avg_max_w": 10.0,
+      "avg_invested": 100.0,
+      "ir": -0.03
+    }
+  ],
+  "variants": {
+    "A_baseline_cap": {
+      "cagr_pct": 35.79,
+      "total_return_pct": 608.95,
+      "ann_vol_pct": 26.95,
+      "sharpe": 1.31,
+      "max_drawdown_pct": -39.0,
+      "calmar": 0.92,
+      "years": 6.49,
+      "annual": {
+        "2020": 57.2,
+        "2021": 23.08,
+        "2022": -26.05,
+        "2023": 40.65,
+        "2024": 62.62,
+        "2025": 40.58,
+        "2026": 58.52
+      },
+      "avg_holdings": 84.6,
+      "avg_max_weight_pct": 65.7,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.72
+    },
+    "B_cap_max10": {
+      "cagr_pct": 28.25,
+      "total_return_pct": 391.76,
+      "ann_vol_pct": 25.15,
+      "sharpe": 1.15,
+      "max_drawdown_pct": -34.54,
+      "calmar": 0.82,
+      "years": 6.49,
+      "annual": {
+        "2020": 27.67,
+        "2021": 28.76,
+        "2022": -26.44,
+        "2023": 48.92,
+        "2024": 29.9,
+        "2025": 30.25,
+        "2026": 65.14
+      },
+      "avg_holdings": 84.6,
+      "avg_max_weight_pct": 10.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": -0.04
+    },
+    "C_equal_weight": {
+      "cagr_pct": 30.51,
+      "total_return_pct": 452.85,
+      "ann_vol_pct": 23.15,
+      "sharpe": 1.31,
+      "max_drawdown_pct": -32.19,
+      "calmar": 0.95,
+      "years": 6.49,
+      "annual": {
+        "2020": 34.78,
+        "2021": 45.33,
+        "2022": -18.98,
+        "2023": 59.36,
+        "2024": 25.8,
+        "2025": 21.37,
+        "2026": 45.94
+      },
+      "avg_holdings": 84.6,
+      "avg_max_weight_pct": 1.2,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.06
+    },
+    "D_mom_filter_cap10": {
+      "cagr_pct": 31.08,
+      "total_return_pct": 466.78,
+      "ann_vol_pct": 25.69,
+      "sharpe": 1.22,
+      "max_drawdown_pct": -32.92,
+      "calmar": 0.94,
+      "years": 6.49,
+      "annual": {
+        "2020": 27.67,
+        "2021": 30.62,
+        "2022": -27.89,
+        "2023": 55.46,
+        "2024": 31.72,
+        "2025": 38.22,
+        "2026": 70.37
+      },
+      "avg_holdings": 61.1,
+      "avg_max_weight_pct": 10.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.14
+    },
+    "E_trend_ma200_cap10": {
+      "cagr_pct": 29.51,
+      "total_return_pct": 423.94,
+      "ann_vol_pct": 25.65,
+      "sharpe": 1.17,
+      "max_drawdown_pct": -33.92,
+      "calmar": 0.87,
+      "years": 6.49,
+      "annual": {
+        "2020": 30.49,
+        "2021": 32.11,
+        "2022": -27.87,
+        "2023": 45.52,
+        "2024": 26.06,
+        "2025": 37.83,
+        "2026": 70.53
+      },
+      "avg_holdings": 56.0,
+      "avg_max_weight_pct": 10.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.05
+    },
+    "F_ex_cyclical_cap10": {
+      "cagr_pct": 28.34,
+      "total_return_pct": 393.99,
+      "ann_vol_pct": 25.52,
+      "sharpe": 1.14,
+      "max_drawdown_pct": -35.88,
+      "calmar": 0.79,
+      "years": 6.49,
+      "annual": {
+        "2020": 28.14,
+        "2021": 26.69,
+        "2022": -27.71,
+        "2023": 52.44,
+        "2024": 30.07,
+        "2025": 31.54,
+        "2026": 65.15
+      },
+      "avg_holdings": 79.7,
+      "avg_max_weight_pct": 10.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": -0.03
+    },
+    "G_roic_stable_cap10": {
+      "cagr_pct": 28.01,
+      "total_return_pct": 385.82,
+      "ann_vol_pct": 25.2,
+      "sharpe": 1.14,
+      "max_drawdown_pct": -34.45,
+      "calmar": 0.81,
+      "years": 6.49,
+      "annual": {
+        "2020": 27.79,
+        "2021": 26.23,
+        "2022": -26.35,
+        "2023": 48.63,
+        "2024": 31.04,
+        "2025": 32.87,
+        "2026": 61.68
+      },
+      "avg_holdings": 62.9,
+      "avg_max_weight_pct": 10.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": -0.06
+    },
+    "H_quality_value_eq": {
+      "cagr_pct": 29.02,
+      "total_return_pct": 412.37,
+      "ann_vol_pct": 21.13,
+      "sharpe": 1.36,
+      "max_drawdown_pct": -30.82,
+      "calmar": 0.94,
+      "years": 6.49,
+      "annual": {
+        "2020": 35.3,
+        "2021": 43.77,
+        "2022": -14.32,
+        "2023": 68.26,
+        "2024": 20.23,
+        "2025": 9.14,
+        "2026": 42.2
+      },
+      "avg_holdings": 42.1,
+      "avg_max_weight_pct": 2.5,
+      "avg_invested_pct": 100.0,
+      "info_ratio": -0.05
+    },
+    "I_roic_mom_score_top40": {
+      "cagr_pct": 34.94,
+      "total_return_pct": 586.63,
+      "ann_vol_pct": 25.68,
+      "sharpe": 1.34,
+      "max_drawdown_pct": -33.82,
+      "calmar": 1.03,
+      "years": 6.49,
+      "annual": {
+        "2020": 35.47,
+        "2021": 53.98,
+        "2022": -23.63,
+        "2023": 62.04,
+        "2024": 34.79,
+        "2025": 36.61,
+        "2026": 47.26
+      },
+      "avg_holdings": 40.0,
+      "avg_max_weight_pct": 2.5,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.29
+    },
+    "J_combo_stable_mom_cap10": {
+      "cagr_pct": 32.51,
+      "total_return_pct": 507.85,
+      "ann_vol_pct": 26.06,
+      "sharpe": 1.25,
+      "max_drawdown_pct": -35.8,
+      "calmar": 0.91,
+      "years": 6.49,
+      "annual": {
+        "2020": 28.32,
+        "2021": 31.18,
+        "2022": -30.05,
+        "2023": 57.67,
+        "2024": 34.36,
+        "2025": 46.64,
+        "2026": 70.04
+      },
+      "avg_holdings": 43.4,
+      "avg_max_weight_pct": 10.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.23
+    },
+    "K_roic_mom_top20": {
+      "cagr_pct": 46.34,
+      "total_return_pct": 1056.38,
+      "ann_vol_pct": 29.35,
+      "sharpe": 1.49,
+      "max_drawdown_pct": -34.67,
+      "calmar": 1.34,
+      "years": 6.49,
+      "annual": {
+        "2020": 48.29,
+        "2021": 67.77,
+        "2022": -18.26,
+        "2023": 77.09,
+        "2024": 43.89,
+        "2025": 53.64,
+        "2026": 48.89
+      },
+      "avg_holdings": 20.0,
+      "avg_max_weight_pct": 5.0,
+      "avg_invested_pct": 100.0,
+      "info_ratio": 0.68
+    },
+    "L_top20_halfcash_ma200": {
+      "cagr_pct": 45.66,
+      "total_return_pct": 1022.08,
+      "ann_vol_pct": 26.04,
+      "sharpe": 1.63,
+      "max_drawdown_pct": -30.81,
+      "calmar": 1.48,
+      "years": 6.49,
+      "annual": {
+        "2020": 48.29,
+        "2021": 67.77,
+        "2022": -14.23,
+        "2023": 71.81,
+        "2024": 43.89,
+        "2025": 46.45,
+        "2026": 48.89
+      },
+      "avg_holdings": 20.0,
+      "avg_max_weight_pct": 5.0,
+      "avg_invested_pct": 91.7,
+      "info_ratio": 0.68
+    },
+    "0050": {
+      "cagr_pct": 29.55,
+      "total_return_pct": 437.23,
+      "ann_vol_pct": 23.02,
+      "sharpe": 1.28,
+      "max_drawdown_pct": -33.83,
+      "calmar": 0.87,
+      "years": 6.49,
+      "annual": {
+        "2020": 35.91,
+        "2021": 21.92,
+        "2022": -21.22,
+        "2023": 27.52,
+        "2024": 48.64,
+        "2025": 36.86,
+        "2026": 58.64
+      }
+    }
+  },
+  "recommendation": {
+    "best_risk_adjusted": "L_top20_halfcash_ma200",
+    "best_return_with_shallower_dd": "L_top20_halfcash_ma200",
+    "notes": [
+      "原版市值加權回檔深，主因台積電權重常>50%",
+      "單檔上限 alone 會犧牲報酬（稀釋台積電）卻未必大幅改善回撤",
+      "ROIC+12個月動能評分、集中前20等權，可同時提高CAGR並壓低回撤",
+      "大盤趨勢濾網（0050 vs 200MA）半倉防守，進一步降低2022回檔",
+      "未扣交易成本；候選池仍有倖存者偏誤；過去績效不保證未來"
+    ]
+  }
+}

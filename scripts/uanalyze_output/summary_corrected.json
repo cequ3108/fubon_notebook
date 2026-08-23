@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-08-23T12:08:49.358538",
+  "formula": "sum(4Q IncomeAfterTaxes) / avg(Equity + LongTermDebt)",
+  "universe_size": 213,
+  "computed": 207,
+  "misses": 6,
+  "count_gt15": 69,
+  "count_gt12": 94,
+  "count_gt10": 120,
+  "tsmc_check": null
+}

@@ -29,3 +29,7 @@ Thumbs.db
 # Test logs
 .test/
 *.log
+
+# Backtest caches & browser dumps (large / ephemeral)
+scripts/uanalyze_output/bt_cache/
+scripts/uanalyze_screenshots/

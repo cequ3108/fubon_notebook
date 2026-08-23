@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-08-23T02:41:17.737319",
+  "universe": "Taiwan market cap top 300",
+  "roic_formula": "UAnalyze style: IncomeAfterTaxes / (Equity + LongTermDebt), 3Y annual avg",
+  "threshold": 0.15,
+  "count": 6,
+  "api_rows_extracted": 0,
+  "output_csv": "/workspace/scripts/uanalyze_output/top300_roic_gt_15_uanalyze_style.csv"
+}
