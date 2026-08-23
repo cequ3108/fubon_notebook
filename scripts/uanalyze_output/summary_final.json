@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-08-23T12:27:24.849329",
+  "formula": "sum(4Q NI) / avg(Equity+LTD)  [UAnalyze style, annualized correctly]",
+  "universe": 300,
+  "computed": 281,
+  "count_gt15": 78,
+  "count_gt12": 109,
+  "count_gt10": 142,
+  "tsmc": [
+    {
+      "stock_id": "2330",
+      "name": "台積電",
+      "roic_3y": 24.85,
+      "roic_latest": 29.67
+    }
+  ]
+}
