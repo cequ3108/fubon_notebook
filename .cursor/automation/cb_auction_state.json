@@ -1,6 +1,88 @@
 {
-  "last_run": "2026-08-23T23:18:18.156838+08:00",
+  "last_run": "2026-08-27T23:02:57.797240+08:00",
   "auctions": {
+    "82221": {
+      "bond_code": "82221",
+      "name": "寶一一",
+      "bond_type": "有擔保轉換公司債",
+      "auction_method": "美國標",
+      "market_label": "有擔保轉換公司債",
+      "bid_period": "2026/08/26-2026/08/28",
+      "open_date": "2026-09-01",
+      "listing_date": "2026-09-10",
+      "broker": "台新",
+      "auction_lots": 3400,
+      "floor_price": 101.0,
+      "min_lot": 1,
+      "min_win_price": null,
+      "max_win_price": null,
+      "underwriting_price": null,
+      "cancelled": "",
+      "status": "bidding",
+      "stock_code": "8222",
+      "meta": {
+        "stock_code": "8222",
+        "bond_code": "82221",
+        "name": "寶一一",
+        "tcri": "7",
+        "collateral": "永豐銀",
+        "issue_amount_100m": 4.0,
+        "broker": "台新證",
+        "auction_schedule": "競拍",
+        "premium_pct": null,
+        "conversion_price": null,
+        "listing_date": "-"
+      },
+      "stock_price": 40.8,
+      "parity": null,
+      "conversion_price": null,
+      "bid_low": 106.09,
+      "bid_high": 114.73,
+      "fair_value": 112.48,
+      "advice": "目前偏債性，建議以底標加歷史得標溢價為主，不建議追高過度偏離債底。",
+      "notes": [
+        "正股 8222 最近收盤 40.80 元",
+        "資金用途：償還銀行借款，節省利息支出，以改善財務結構、提升整體營運發展（偏還舊債，評分 25）",
+        "用途「償還銀行借款，節省利息支出，以改善財務結構、提升整體營運發展」以償債為主，成長性較弱，宜保守出價"
+      ],
+      "position": {
+        "size_tier": "micro",
+        "market_cap_yi": 27.98,
+        "target_budget_twd": 400000,
+        "deposit_est_twd": 222200,
+        "tickets": [
+          {
+            "price": 106.09,
+            "lots": 1,
+            "amount_twd": 106090,
+            "role": "cheap"
+          },
+          {
+            "price": 110.35,
+            "lots": 1,
+            "amount_twd": 110350,
+            "role": "core"
+          },
+          {
+            "price": 113.23,
+            "lots": 1,
+            "amount_twd": 113230,
+            "role": "core"
+          },
+          {
+            "price": 114.73,
+            "lots": 1,
+            "amount_twd": 114730,
+            "role": "insure"
+          }
+        ],
+        "rationale": "市值約 28 億 → 微型股，基準配置 80 萬；資金用途偏還債／調度（偏還舊債），部位下修；TCRI 7 偏弱，部位下修控風險；有擔保（永豐銀），部位略增；還債／調度用途：建議標價勿衝太高，保險倉靠近合理價即可。資金用途評分 25/100（偏還舊債）；建議 4 筆階梯標：低價衝便宜成本、高價保命中率。",
+        "purpose_category": "refinance",
+        "purpose_score": 25,
+        "purpose_label": "偏還舊債",
+        "purpose_text": "償還銀行借款，節省利息支出，以改善財務結構、提升整體營運發展"
+      }
+    },
     "24643": {
       "bond_code": "24643",
       "name": "盟立三",
@@ -14,11 +96,11 @@
       "auction_lots": 8500,
       "floor_price": 103.0,
       "min_lot": 1,
-      "min_win_price": null,
-      "max_win_price": null,
-      "underwriting_price": null,
+      "min_win_price": 111.95,
+      "max_win_price": 142.0,
+      "underwriting_price": 114.07,
       "cancelled": "",
-      "status": "bidding",
+      "status": "awaiting_result",
       "stock_code": "2464",
       "meta": {
         "stock_code": "2464",
@@ -29,75 +111,72 @@
         "issue_amount_100m": 10.0,
         "broker": "中信證",
         "auction_schedule": "競拍 8/21-8/25",
-        "premium_pct": 106.0,
-        "conversion_price": 202.8,
-        "listing_date": "2026/09/07"
+        "premium_pct": null,
+        "conversion_price": null,
+        "listing_date": "202.80"
       },
-      "stock_price": 179.0,
-      "parity": 88.26,
-      "conversion_price": 202.8,
-      "bid_low": 107.64,
-      "bid_high": 116.62,
-      "fair_value": 114.33,
+      "stock_price": 211.0,
+      "parity": null,
+      "conversion_price": null,
+      "bid_low": 108.19,
+      "bid_high": 116.99,
+      "fair_value": 114.7,
       "advice": "目前偏債性，建議以底標加歷史得標溢價為主，不建議追高過度偏離債底。",
       "notes": [
-        "正股 2464 最近收盤 179.00 元",
-        "轉換價 202.80 元",
-        "轉換價值 88.3%，屬價外，主要受底標與信用/賣回條件支撐。",
-        "公告轉換溢價率 106.00%",
+        "正股 2464 最近收盤 211.00 元",
         "資金用途：償還銀行借款及充實營運資金（還債＋營運資金，評分 32）",
         "用途「償還銀行借款及充實營運資金」偏財務調度／借新還舊，建議縮小部位、標價勿衝太高"
       ],
       "position": {
         "size_tier": "mid",
-        "market_cap_yi": 387.86,
+        "market_cap_yi": 457.2,
         "target_budget_twd": 1600000,
-        "deposit_est_twd": 887940,
+        "deposit_est_twd": 891680,
         "tickets": [
           {
-            "price": 107.64,
+            "price": 108.19,
             "lots": 6,
-            "amount_twd": 645840,
+            "amount_twd": 649140,
             "role": "cheap"
           },
           {
-            "price": 109.87,
+            "price": 110.36,
             "lots": 3,
-            "amount_twd": 329610,
+            "amount_twd": 331080,
             "role": "core"
           },
           {
-            "price": 112.1,
+            "price": 112.53,
             "lots": 2,
-            "amount_twd": 224200,
+            "amount_twd": 225060,
             "role": "core"
           },
           {
-            "price": 114.33,
+            "price": 114.7,
             "lots": 2,
-            "amount_twd": 228660,
+            "amount_twd": 229400,
             "role": "core"
           },
           {
-            "price": 115.09,
+            "price": 115.46,
             "lots": 1,
-            "amount_twd": 115090,
+            "amount_twd": 115460,
             "role": "core"
           },
           {
-            "price": 115.86,
+            "price": 116.23,
             "lots": 1,
-            "amount_twd": 115860,
+            "amount_twd": 116230,
             "role": "core"
           },
           {
-            "price": 116.62,
+            "price": 116.99,
             "lots": 1,
-            "amount_twd": 116620,
+            "amount_twd": 116990,
             "role": "insure"
           }
         ],
-        "rationale": "市值約 388 億 → 中型股，基準配置 250 萬；資金用途偏還債／調度（還債＋營運資金），部位下修；TCRI 6 中性偏弱，部位略減；無擔保，維持信用風險折扣；還債／調度用途：建議標價勿衝太高，保險倉靠近合理價即可。資金用途評分 32/100（還債＋營運資金）；建議 7 筆階梯標：低價衝便宜成本、高價保命中率。",
+        "rationale": "市值約 457 億 → 中型股，基準配置 250 萬；資金用途偏還債／調度（還債＋營運資金），部位下修；TCRI 6 中性偏弱，部位略減；無擔保，維持信用風險折扣；還債／調度用途：建議標價勿衝太高，保險倉靠近合理價即可。資金用途評分 32/100（還債＋營運資金）；建議 7 筆階梯標：低價衝便宜成本、高價保命中率。",
         "purpose_category": "refinance",
         "purpose_score": 32,
         "purpose_label": "還債＋營運資金",
@@ -111,17 +190,17 @@
       "auction_method": "美國標",
       "market_label": "無擔保轉換公司債",
       "bid_period": "2026/08/19-2026/08/21",
-      "open_date": "2026-08-25",
+      "open_date": "2026-08-26",
       "listing_date": "2026-09-03",
       "broker": "元大",
       "auction_lots": 9000,
       "floor_price": 103.0,
       "min_lot": 1,
-      "min_win_price": null,
-      "max_win_price": null,
-      "underwriting_price": null,
+      "min_win_price": 122.5,
+      "max_win_price": 168.8,
+      "underwriting_price": 124.21,
       "cancelled": "",
-      "status": "awaiting_result",
+      "status": "completed",
       "stock_code": "1560",
       "meta": {
         "stock_code": "1560",
@@ -132,86 +211,19 @@
         "issue_amount_100m": 10.0,
         "broker": "元大證",
         "auction_schedule": "競拍 8/19-8/21",
-        "premium_pct": 102.0,
-        "conversion_price": 708.3,
-        "listing_date": "2026/09/03"
+        "premium_pct": null,
+        "conversion_price": null,
+        "listing_date": "708.30"
       },
-      "stock_price": 679.0,
-      "parity": 95.86,
-      "conversion_price": 708.3,
-      "bid_low": 107.64,
-      "bid_high": 119.69,
-      "fair_value": 114.33,
-      "advice": "目前偏債性，建議以底標加歷史得標溢價為主，不建議追高過度偏離債底。",
-      "notes": [
-        "正股 1560 最近收盤 679.00 元",
-        "轉換價 708.30 元",
-        "轉換價值 95.9%，屬價外，主要受底標與信用/賣回條件支撐。",
-        "公告轉換溢價率 102.00%",
-        "資金用途：充實營運資金（充實營運資金，評分 48）",
-        "用途「充實營運資金」偏營運週轉，中性，標價維持合理區間即可"
-      ],
-      "position": {
-        "size_tier": "large",
-        "market_cap_yi": 1011.2,
-        "target_budget_twd": 5500000,
-        "deposit_est_twd": 3069060,
-        "tickets": [
-          {
-            "price": 107.64,
-            "lots": 15,
-            "amount_twd": 1614600,
-            "role": "cheap"
-          },
-          {
-            "price": 109.55,
-            "lots": 10,
-            "amount_twd": 1095500,
-            "role": "core"
-          },
-          {
-            "price": 111.46,
-            "lots": 9,
-            "amount_twd": 1003140,
-            "role": "core"
-          },
-          {
-            "price": 113.37,
-            "lots": 7,
-            "amount_twd": 793590,
-            "role": "core"
-          },
-          {
-            "price": 115.1,
-            "lots": 6,
-            "amount_twd": 690600,
-            "role": "core"
-          },
-          {
-            "price": 116.63,
-            "lots": 4,
-            "amount_twd": 466520,
-            "role": "core"
-          },
-          {
-            "price": 118.16,
-            "lots": 3,
-            "amount_twd": 354480,
-            "role": "core"
-          },
-          {
-            "price": 119.69,
-            "lots": 1,
-            "amount_twd": 119690,
-            "role": "insure"
-          }
-        ],
-        "rationale": "市值約 1011 億 → 大型股，基準配置 500 萬；資金用途偏營運資金（充實營運資金），部位略保守；TCRI 4 較佳，部位略增；無擔保，維持信用風險折扣；營運資金用途：中性，維持合理區間、少追高。資金用途評分 48/100（充實營運資金）；建議 8 筆階梯標：低價衝便宜成本、高價保命中率。",
-        "purpose_category": "working_capital",
-        "purpose_score": 48,
-        "purpose_label": "充實營運資金",
-        "purpose_text": "充實營運資金"
-      }
+      "stock_price": null,
+      "parity": null,
+      "conversion_price": null,
+      "bid_low": null,
+      "bid_high": null,
+      "fair_value": null,
+      "advice": "",
+      "notes": [],
+      "position": null
     },
     "23032": {
       "bond_code": "23032",
@@ -220,17 +232,17 @@
       "auction_method": "美國標",
       "market_label": "無擔保轉換公司債",
       "bid_period": "2026/08/19-2026/08/21",
-      "open_date": "2026-08-25",
+      "open_date": "2026-08-26",
       "listing_date": "2026-09-03",
       "broker": "宏遠",
       "auction_lots": 34000,
       "floor_price": 100.0,
       "min_lot": 1,
-      "min_win_price": null,
-      "max_win_price": null,
-      "underwriting_price": null,
+      "min_win_price": 118.3,
+      "max_win_price": 131.58,
+      "underwriting_price": 119.82,
       "cancelled": "",
-      "status": "awaiting_result",
+      "status": "completed",
       "stock_code": "2303",
       "meta": {
         "stock_code": "2303",
@@ -241,98 +253,19 @@
         "issue_amount_100m": 40.0,
         "broker": "宏遠證",
         "auction_schedule": "競拍 8/19-8/21",
-        "premium_pct": 104.98,
-        "conversion_price": 130.7,
-        "listing_date": "2026/09/03"
+        "premium_pct": null,
+        "conversion_price": null,
+        "listing_date": "130.70"
       },
-      "stock_price": 116.5,
-      "parity": 89.14,
-      "conversion_price": 130.7,
-      "bid_low": 104.51,
-      "bid_high": 119.43,
-      "fair_value": 111.0,
-      "advice": "目前偏債性，建議以底標加歷史得標溢價為主，不建議追高過度偏離債底。",
-      "notes": [
-        "正股 2303 最近收盤 116.50 元",
-        "轉換價 130.70 元",
-        "轉換價值 89.1%，屬價外，主要受底標與信用/賣回條件支撐。",
-        "公告轉換溢價率 104.98%",
-        "資金用途：購置機器設備（偏成長用途，評分 82）",
-        "用途「購置機器設備」偏擴產／設備／研發，較具成長想像，可相對積極"
-      ],
-      "position": {
-        "size_tier": "mega",
-        "market_cap_yi": 14644.16,
-        "target_budget_twd": 13200000,
-        "deposit_est_twd": 7181715,
-        "tickets": [
-          {
-            "price": 104.51,
-            "lots": 28,
-            "amount_twd": 2926280,
-            "role": "cheap"
-          },
-          {
-            "price": 105.95,
-            "lots": 21,
-            "amount_twd": 2224950,
-            "role": "core"
-          },
-          {
-            "price": 107.39,
-            "lots": 19,
-            "amount_twd": 2040410,
-            "role": "core"
-          },
-          {
-            "price": 108.84,
-            "lots": 16,
-            "amount_twd": 1741440,
-            "role": "core"
-          },
-          {
-            "price": 110.28,
-            "lots": 14,
-            "amount_twd": 1543920,
-            "role": "core"
-          },
-          {
-            "price": 111.94,
-            "lots": 12,
-            "amount_twd": 1343280,
-            "role": "core"
-          },
-          {
-            "price": 113.81,
-            "lots": 9,
-            "amount_twd": 1024290,
-            "role": "core"
-          },
-          {
-            "price": 115.68,
-            "lots": 7,
-            "amount_twd": 809760,
-            "role": "core"
-          },
-          {
-            "price": 117.56,
-            "lots": 4,
-            "amount_twd": 470240,
-            "role": "core"
-          },
-          {
-            "price": 119.43,
-            "lots": 2,
-            "amount_twd": 238860,
-            "role": "insure"
-          }
-        ],
-        "rationale": "市值約 14644 億 → 超大型股，基準配置 1000 萬；資金用途偏成長（偏成長用途），部位略增；TCRI 3 較佳，部位略增；無擔保，維持信用風險折扣；成長用途：可相對積極，但仍以合理價附近為核心倉。資金用途評分 82/100（偏成長用途）；建議 10 筆階梯標：低價衝便宜成本、高價保命中率。",
-        "purpose_category": "growth",
-        "purpose_score": 82,
-        "purpose_label": "偏成長用途",
-        "purpose_text": "購置機器設備"
-      }
+      "stock_price": null,
+      "parity": null,
+      "conversion_price": null,
+      "bid_low": null,
+      "bid_high": null,
+      "fair_value": null,
+      "advice": "",
+      "notes": [],
+      "position": null
     },
     "31494": {
       "bond_code": "31494",
@@ -364,7 +297,7 @@
         "auction_schedule": "競拍 8/14-8/18",
         "premium_pct": null,
         "conversion_price": null,
-        "listing_date": "68.10"
+        "listing_date": "104.42%"
       },
       "stock_price": null,
       "parity": null,
