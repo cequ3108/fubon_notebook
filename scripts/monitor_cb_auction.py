@@ -17,6 +17,7 @@ import json
 import os
 import re
 import smtplib
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -1304,6 +1305,26 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_stock_subscription_monitor(args: argparse.Namespace) -> int:
+    """Also check HiStock 公開申購 so existing Automation need not change prompt."""
+    if os.getenv("SKIP_STOCK_SUB_MONITOR") == "1":
+        return 0
+    script = ROOT / "scripts" / "monitor_stock_subscription.py"
+    if not script.exists():
+        print(f"WARN: 找不到 {script}，略過股票申購監控", file=sys.stderr)
+        return 0
+    cmd = [sys.executable, str(script)]
+    if args.dry_run:
+        cmd.append("--dry-run")
+    if args.force_notify:
+        cmd.append("--force-notify")
+    elif args.notify:
+        cmd.append("--notify")
+    print("\n===== 接續執行股票公開申購監控 =====\n")
+    completed = subprocess.run(cmd, check=False)
+    return int(completed.returncode)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Monitor Taiwan CB auctions")
     parser.add_argument("--dry-run", action="store_true", help="不寫入 state、不寄信")
@@ -1313,7 +1334,9 @@ def main() -> int:
     if args.force_notify:
         args.notify = True
     try:
-        return run(args)
+        rc = run(args)
+        sub_rc = run_stock_subscription_monitor(args)
+        return rc or sub_rc
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
