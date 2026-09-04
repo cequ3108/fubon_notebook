@@ -74,15 +74,16 @@ def collect_sub_cards(limit: int = 5):
 
 
 def send_combined(cb_pairs, sub_pairs) -> None:
-    email = os.environ.get("UANALYZE_EMAIL") or os.environ.get("CB_ALERT_EMAIL")
-    password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "")
-    if not email or not password:
-        raise RuntimeError("缺少 UANALYZE_EMAIL / GMAIL_APP_PASSWORD")
+    from email_util import resolve_recipients, sender_credentials
+
+    email, password = sender_credentials()
+    recipients = resolve_recipients(email)
 
     now = datetime.now(TPE).strftime("%Y-%m-%d %H:%M")
     text_lines = [
         "【監控圖卡測試】可轉債競拍 + 股票公開申購",
         f"時間：{now}（台北）",
+        f"收件人：{', '.join(recipients)}",
         "",
         f"可轉債圖卡：{len(cb_pairs)} 張",
     ]
@@ -100,6 +101,7 @@ def send_combined(cb_pairs, sub_pairs) -> None:
         "<html><body style='font-family:sans-serif;color:#111;line-height:1.5;'>",
         "<h2>監控圖卡測試：可轉債 + 股票申購</h2>",
         f"<p>產生時間：{escape(now)}（台北）</p>",
+        f"<p>收件人：{escape(', '.join(recipients))}</p>",
         f"<h3>可轉債競拍圖卡（{len(cb_pairs)}）</h3>",
     ]
     for a, p in cb_pairs:
@@ -126,7 +128,7 @@ def send_combined(cb_pairs, sub_pairs) -> None:
     msg = MIMEMultipart("mixed")
     msg["Subject"] = f"[監控測試] 可轉債 {len(cb_pairs)} + 申購 {len(sub_pairs)} 圖卡"
     msg["From"] = email
-    msg["To"] = email
+    msg["To"] = ", ".join(recipients)
 
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(text, "plain", "utf-8"))
@@ -149,9 +151,9 @@ def send_combined(cb_pairs, sub_pairs) -> None:
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(email, password)
-        smtp.sendmail(email, [email], msg.as_string())
+        smtp.sendmail(email, recipients, msg.as_string())
 
-    print(f"已寄送合併測試信至 {email}")
+    print(f"已寄送合併測試信至：{', '.join(recipients)}")
     print(f"可轉債圖卡 {len(cb_pairs)}、申購圖卡 {len(sub_pairs)}，附件共 {len(all_paths)} 張")
 
 

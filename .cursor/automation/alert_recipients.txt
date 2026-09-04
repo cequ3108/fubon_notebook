@@ -1,0 +1,3 @@
+# 監控通知收件人（每行一個；# 開頭為註解）
+cequ3108@gmail.com
+ace800516mgdm@gmail.com

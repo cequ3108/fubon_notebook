@@ -1202,15 +1202,15 @@ def send_email(
     html: str,
     card_paths: list[Path] | None = None,
 ) -> None:
-    email = os.environ.get("UANALYZE_EMAIL") or os.environ.get("CB_ALERT_EMAIL")
-    password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "")
-    if not email or not password:
-        raise RuntimeError("缺少 UANALYZE_EMAIL / GMAIL_APP_PASSWORD，無法寄送 Email")
+    from email_util import resolve_recipients, sender_credentials
+
+    email, password = sender_credentials()
+    recipients = resolve_recipients(email)
 
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = email
-    msg["To"] = email
+    msg["To"] = ", ".join(recipients)
 
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(text, "plain", "utf-8"))
@@ -1235,8 +1235,8 @@ def send_email(
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(email, password)
-        smtp.sendmail(email, [email], msg.as_string())
-
+        smtp.sendmail(email, recipients, msg.as_string())
+    print(f"收件人：{', '.join(recipients)}")
 
 def run(args: argparse.Namespace) -> int:
     today = datetime.now(TPE).date()
@@ -1293,7 +1293,7 @@ def run(args: argparse.Namespace) -> int:
         card_cids = [(p.stem, f"{a.name} ({a.bond_code})") for a, p in card_pairs]
         html = render_html_report(report, focus, card_cids=card_cids)
         send_email(subject, report, html, card_paths=card_paths)
-        print(f"\n已寄送 Email（含圖卡）至 {os.environ.get('UANALYZE_EMAIL')}")
+        print(f"\n已寄送 Email（含圖卡）至 {os.environ.get('UANALYZE_EMAIL')}（含額外收件人）")
 
     if not args.dry_run:
         save_state(
