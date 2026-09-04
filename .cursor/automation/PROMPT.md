@@ -14,12 +14,14 @@
 
 ## 執行
 
+`monitor_cb_auction.py` 結束後會自動接續跑股票公開申購監控
+（可用 `SKIP_STOCK_SUB_MONITOR=1` 關閉）。
+
 ```bash
 export CB_AUCTION_STATE_PATH=.cursor/automation/cb_auction_state.json
 export STOCK_SUB_STATE_PATH=.cursor/automation/stock_subscription_state.json
 
 python3 scripts/monitor_cb_auction.py --notify
-python3 scripts/monitor_stock_subscription.py --notify
 ```
 
 ## 執行後
