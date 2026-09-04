@@ -17,6 +17,7 @@ import sys
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape, unescape
@@ -31,10 +32,16 @@ STATE_PATH = Path(
         ROOT / ".cursor" / "automation" / "stock_subscription_state.json",
     )
 )
+CARD_DIR = Path(os.getenv("STOCK_SUB_CARD_DIR", ROOT / ".data" / "sub_cards"))
 SOURCE_URL = "https://histock.tw/stock/public.aspx"
 USER_AGENT = "Mozilla/5.0 (compatible; stock-subscription-monitor/1.0)"
 
 ACTIVE_STATUSES = {"open", "closing_today", "upcoming"}
+FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+]
 
 
 @dataclass
@@ -236,15 +243,7 @@ def format_item_lines(item: Subscription) -> list[str]:
     ]
     if item.note:
         lines.append(f"  備註：{item.note}")
-    if item.return_pct is not None:
-        if item.return_pct >= 20:
-            lines.append("  建議：報酬率偏高，可優先評估申購（仍需考量中籤率與資金凍結）。")
-        elif item.return_pct >= 5:
-            lines.append("  建議：有正報酬空間，可依資金與中籤率決定是否參與。")
-        elif item.return_pct > 0:
-            lines.append("  建議：報酬偏低，留意手續費與資金成本。")
-        else:
-            lines.append("  建議：目前市價低於承銷價，申購優勢較弱。")
+    lines.append(f"  建議：{advice_for(item)}")
     return lines
 
 
@@ -285,11 +284,172 @@ def render_text_report(
     return "\n".join(lines)
 
 
-def render_html_report(text: str, focus: list[Subscription]) -> str:
-    cards: list[str] = []
+def advice_for(item: Subscription) -> str:
+    if item.return_pct is None:
+        return "留意申購期間與中籤率，自行評估資金成本。"
+    if item.return_pct >= 20:
+        return "報酬率偏高，可優先評估申購（仍需考量中籤率與資金凍結）。"
+    if item.return_pct >= 5:
+        return "有正報酬空間，可依資金與中籤率決定是否參與。"
+    if item.return_pct > 0:
+        return "報酬偏低，留意手續費與資金成本。"
+    return "目前市價低於承銷價，申購優勢較弱。"
+
+
+def _load_font(size: int):
+    from PIL import ImageFont
+
+    for path in FONT_CANDIDATES:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size=size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def render_share_card(item: Subscription, out_path: Path) -> Path:
+    """產生可分享的公開申購圖卡（手機轉傳友善）。"""
+    from PIL import Image, ImageDraw
+
+    width, height = 1080, 980
+    bg = (16, 32, 28)
+    panel = (28, 52, 46)
+    line = (48, 86, 72)
+    text = (236, 244, 240)
+    muted = (156, 188, 172)
+    accent = (255, 196, 72)
+    pos_c = (72, 187, 156)
+    neg_c = (248, 113, 113)
+
+    status_zh = {
+        "upcoming": "即將開始",
+        "open": "申購中",
+        "closing_today": "今日截止",
+        "closed": "已截止",
+        "unknown": "未知",
+    }.get(item.status, item.status)
+    ret_color = pos_c if (item.return_pct or 0) >= 0 else neg_c
+
+    img = Image.new("RGB", (width, height), bg)
+    draw = ImageDraw.Draw(img)
+    font_title = _load_font(54)
+    font_h2 = _load_font(40)
+    font_body = _load_font(30)
+    font_small = _load_font(24)
+    font_tiny = _load_font(20)
+
+    def text_w(s: str, font) -> int:
+        box = draw.textbbox((0, 0), s, font=font)
+        return box[2] - box[0]
+
+    y = 36
+    draw.text((48, y), "股票公開申購", fill=accent, font=font_small)
+    y += 42
+    draw.text((48, y), f"{item.name}  {item.stock_code}", fill=text, font=font_title)
+    y += 70
+    draw.text(
+        (48, y),
+        f"{item.market}　{status_zh}　申購 {item.apply_period}",
+        fill=muted,
+        font=font_small,
+    )
+    y += 52
+
+    offer = f"{item.offer_price:g}" if item.offer_price is not None else "—"
+    mkt = f"{item.market_price:g}" if item.market_price is not None else "—"
+    ret = f"{item.return_pct:.1f}%" if item.return_pct is not None else "—"
+    profit = fmt_money(item.profit_twd)
+    metrics = [
+        ("承銷價", f"{offer} 元"),
+        ("市價", f"{mkt} 元"),
+        ("報酬率", ret),
+        ("預估獲利", f"{profit} 元"),
+    ]
+    box_w = (width - 48 * 2 - 18 * 3) // 4
+    for i, (label, value) in enumerate(metrics):
+        x = 48 + i * (box_w + 18)
+        draw.rounded_rectangle((x, y, x + box_w, y + 120), radius=16, fill=panel)
+        draw.text((x + 18, y + 18), label, fill=muted, font=font_tiny)
+        color = ret_color if label in {"報酬率", "預估獲利"} else text
+        f = font_h2 if text_w(value, font_h2) < box_w - 24 else font_body
+        draw.text((x + 18, y + 56), value, fill=color, font=f)
+    y += 150
+
+    details = [
+        ("抽籤日", item.lottery_date),
+        ("撥券日", item.allot_date),
+        ("承銷張數", fmt_money(item.underwrite_lots)),
+        ("申購張數", str(item.apply_lots) if item.apply_lots is not None else "—"),
+        ("中籤率", f"{item.win_rate_pct:g}%" if item.win_rate_pct is not None else "—"),
+        ("合格件", fmt_money(item.qualified_apps)),
+    ]
+    draw.rounded_rectangle((48, y, width - 48, y + 220), radius=16, fill=panel)
+    draw.text((72, y + 24), "申購資訊", fill=text, font=font_h2)
+    row_y = y + 80
+    for i, (label, value) in enumerate(details):
+        col = i % 3
+        row = i // 3
+        x = 72 + col * 320
+        yy = row_y + row * 70
+        draw.text((x, yy), label, fill=muted, font=font_tiny)
+        draw.text((x, yy + 28), value, fill=text, font=font_body)
+
+    y += 250
+    advice = advice_for(item)
+    draw.text((48, y), "分享建議", fill=accent, font=font_small)
+    y += 40
+    if len(advice) > 28:
+        draw.text((48, y), advice[:28], fill=text, font=font_body)
+        y += 40
+        draw.text((48, y), advice[28:], fill=text, font=font_body)
+    else:
+        draw.text((48, y), advice, fill=text, font=font_body)
+
+    y = height - 90
+    draw.line((48, y, width - 48, y), fill=line, width=1)
+    y += 18
+    draw.text((48, y), "資料來源 HiStock｜僅供研究分享，不構成投資建議", fill=muted, font=font_tiny)
+    y += 32
+    draw.text((48, y), item.detail_url, fill=muted, font=font_tiny)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out_path, format="PNG", optimize=True)
+    return out_path
+
+
+def generate_share_cards(items: list[Subscription]) -> list[tuple[Subscription, Path]]:
+    results: list[tuple[Subscription, Path]] = []
+    stamp = datetime.now(TPE).strftime("%Y%m%d_%H%M")
+    for item in items:
+        path = CARD_DIR / f"sub_{item.stock_code}_{stamp}.png"
+        results.append((item, render_share_card(item, path)))
+    return results
+
+
+def render_html_report(
+    text: str,
+    focus: list[Subscription],
+    card_cids: list[tuple[str, str]] | None = None,
+) -> str:
+    parts = [
+        "<html><body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;"
+        "line-height:1.5;color:#222;'>",
+        "<h2>股票公開申購監控</h2>",
+        f"<p>產生時間：{escape(datetime.now(TPE).strftime('%Y-%m-%d %H:%M'))}（台北）</p>",
+        "<p>下方附上可分享圖卡（也可直接轉傳附件 PNG）。</p>",
+    ]
+    for cid, caption in card_cids or []:
+        parts.append(
+            "<div style='margin:0 0 16px;'>"
+            f"<p style='margin:0 0 8px;font-weight:600;'>{escape(caption)}</p>"
+            f"<img src='cid:{escape(cid)}' alt='{escape(caption)}' "
+            "style='max-width:100%;border-radius:12px;'/>"
+            "</div>"
+        )
     for item in focus:
         ret_color = "#c62828" if (item.return_pct or 0) >= 0 else "#2e7d32"
-        cards.append(
+        parts.append(
             "<div style='border:1px solid #e0e0e0;border-radius:10px;padding:12px;"
             "margin:0 0 12px;background:#fff;'>"
             f"<h3 style='margin:0 0 8px;'>{escape(item.name)} "
@@ -302,12 +462,8 @@ def render_html_report(text: str, focus: list[Subscription]) -> str:
             f"<p style='margin:8px 0 0;'><a href='{escape(item.detail_url)}'>HiStock 詳情</a></p>"
             "</div>"
         )
-    return (
-        "<html><body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;"
-        "line-height:1.5;color:#222;'>"
-        "<h2>股票公開申購監控</h2>"
-        + "".join(cards)
-        + "<pre style='background:#f7f7f7;padding:12px;border-radius:8px;"
+    parts.append(
+        "<pre style='background:#f7f7f7;padding:12px;border-radius:8px;"
         "white-space:pre-wrap;'>"
         + escape(text)
         + "</pre>"
@@ -315,20 +471,44 @@ def render_html_report(text: str, focus: list[Subscription]) -> str:
         f"資料來源：<a href='{SOURCE_URL}'>HiStock 公開申購</a></p>"
         "</body></html>"
     )
+    return "".join(parts)
 
 
-def send_email(subject: str, text: str, html: str) -> None:
+def send_email(
+    subject: str,
+    text: str,
+    html: str,
+    card_paths: list[Path] | None = None,
+) -> None:
     email = os.environ.get("UANALYZE_EMAIL") or os.environ.get("CB_ALERT_EMAIL")
     password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "")
     if not email or not password:
         raise RuntimeError("缺少 UANALYZE_EMAIL / GMAIL_APP_PASSWORD，無法寄送 Email")
 
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = email
     msg["To"] = email
-    msg.attach(MIMEText(text, "plain", "utf-8"))
-    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(text, "plain", "utf-8"))
+
+    related = MIMEMultipart("related")
+    related.attach(MIMEText(html, "html", "utf-8"))
+    for path in card_paths or []:
+        with path.open("rb") as f:
+            img = MIMEImage(f.read(), _subtype="png")
+        img.add_header("Content-ID", f"<{path.stem}>")
+        img.add_header("Content-Disposition", "inline", filename=path.name)
+        related.attach(img)
+    alt.attach(related)
+    msg.attach(alt)
+
+    for path in card_paths or []:
+        with path.open("rb") as f:
+            att = MIMEImage(f.read(), _subtype="png")
+        att.add_header("Content-Disposition", "attachment", filename=path.name)
+        msg.attach(att)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(email, password)
@@ -353,6 +533,13 @@ def run(args: argparse.Namespace) -> int:
     report = render_text_report(focus, active, reasons)
     print(report)
 
+    card_pairs = generate_share_cards(focus)
+    card_paths = [p for _, p in card_pairs]
+    if card_paths:
+        print("\n已產生分享圖卡：")
+        for p in card_paths:
+            print(f"  - {p}")
+
     should_notify = args.force_notify or (args.notify and bool(alerts))
     if should_notify and not args.dry_run:
         subject = "[股票申購]"
@@ -360,9 +547,10 @@ def run(args: argparse.Namespace) -> int:
             subject += f" {alerts[0].name} 等 {len(alerts)} 檔需關注"
         else:
             subject += " 監控摘要"
-        html = render_html_report(report, focus)
-        send_email(subject, report, html)
-        print(f"\n已寄送 Email 至 {os.environ.get('UANALYZE_EMAIL')}")
+        card_cids = [(p.stem, f"{a.name} ({a.stock_code})") for a, p in card_pairs]
+        html = render_html_report(report, focus, card_cids=card_cids)
+        send_email(subject, report, html, card_paths=card_paths)
+        print(f"\n已寄送 Email（含圖卡）至 {os.environ.get('UANALYZE_EMAIL')}")
 
     if not args.dry_run:
         # Persist active / upcoming / alerted rows for next-run diff.
