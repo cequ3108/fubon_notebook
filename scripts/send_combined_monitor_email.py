@@ -83,7 +83,6 @@ def send_combined(cb_pairs, sub_pairs) -> None:
     text_lines = [
         "【監控圖卡測試】可轉債競拍 + 股票公開申購",
         f"時間：{now}（台北）",
-        f"收件人：{', '.join(recipients)}",
         "",
         f"可轉債圖卡：{len(cb_pairs)} 張",
     ]
@@ -101,7 +100,6 @@ def send_combined(cb_pairs, sub_pairs) -> None:
         "<html><body style='font-family:sans-serif;color:#111;line-height:1.5;'>",
         "<h2>監控圖卡測試：可轉債 + 股票申購</h2>",
         f"<p>產生時間：{escape(now)}（台北）</p>",
-        f"<p>收件人：{escape(', '.join(recipients))}</p>",
         f"<h3>可轉債競拍圖卡（{len(cb_pairs)}）</h3>",
     ]
     for a, p in cb_pairs:
@@ -125,35 +123,39 @@ def send_combined(cb_pairs, sub_pairs) -> None:
 
     all_paths = [p for _, p in cb_pairs] + [p for _, p in sub_pairs]
 
-    msg = MIMEMultipart("mixed")
-    msg["Subject"] = f"[監控測試] 可轉債 {len(cb_pairs)} + 申購 {len(sub_pairs)} 圖卡"
-    msg["From"] = email
-    msg["To"] = ", ".join(recipients)
+    def build_msg(to_addr: str) -> MIMEMultipart:
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"[監控測試] 可轉債 {len(cb_pairs)} + 申購 {len(sub_pairs)} 圖卡"
+        msg["From"] = email
+        msg["To"] = to_addr
 
-    alt = MIMEMultipart("alternative")
-    alt.attach(MIMEText(text, "plain", "utf-8"))
-    related = MIMEMultipart("related")
-    related.attach(MIMEText(html, "html", "utf-8"))
-    for path in all_paths:
-        with path.open("rb") as f:
-            img = MIMEImage(f.read(), _subtype="png")
-        img.add_header("Content-ID", f"<{path.stem}>")
-        img.add_header("Content-Disposition", "inline", filename=path.name)
-        related.attach(img)
-    alt.attach(related)
-    msg.attach(alt)
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(text, "plain", "utf-8"))
+        related = MIMEMultipart("related")
+        related.attach(MIMEText(html, "html", "utf-8"))
+        for path in all_paths:
+            with path.open("rb") as f:
+                img = MIMEImage(f.read(), _subtype="png")
+            img.add_header("Content-ID", f"<{path.stem}>")
+            img.add_header("Content-Disposition", "inline", filename=path.name)
+            related.attach(img)
+        alt.attach(related)
+        msg.attach(alt)
 
-    for path in all_paths:
-        with path.open("rb") as f:
-            att = MIMEImage(f.read(), _subtype="png")
-        att.add_header("Content-Disposition", "attachment", filename=path.name)
-        msg.attach(att)
+        for path in all_paths:
+            with path.open("rb") as f:
+                att = MIMEImage(f.read(), _subtype="png")
+            att.add_header("Content-Disposition", "attachment", filename=path.name)
+            msg.attach(att)
+        return msg
 
+    # 逐一寄送，避免收件人互看信箱
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(email, password)
-        smtp.sendmail(email, recipients, msg.as_string())
+        for to_addr in recipients:
+            smtp.sendmail(email, [to_addr], build_msg(to_addr).as_string())
 
-    print(f"已寄送合併測試信至：{', '.join(recipients)}")
+    print(f"已分別寄送合併測試信至 {len(recipients)} 位收件人")
     print(f"可轉債圖卡 {len(cb_pairs)}、申購圖卡 {len(sub_pairs)}，附件共 {len(all_paths)} 張")
 
 
