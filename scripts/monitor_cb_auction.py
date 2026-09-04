@@ -1207,36 +1207,40 @@ def send_email(
     email, password = sender_credentials()
     recipients = resolve_recipients(email)
 
-    msg = MIMEMultipart("mixed")
-    msg["Subject"] = subject
-    msg["From"] = email
-    msg["To"] = ", ".join(recipients)
+    def build_msg(to_addr: str) -> MIMEMultipart:
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"] = email
+        msg["To"] = to_addr
 
-    alt = MIMEMultipart("alternative")
-    alt.attach(MIMEText(text, "plain", "utf-8"))
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(text, "plain", "utf-8"))
 
-    related = MIMEMultipart("related")
-    related.attach(MIMEText(html, "html", "utf-8"))
-    for path in card_paths or []:
-        with path.open("rb") as f:
-            img = MIMEImage(f.read(), _subtype="png")
-        img.add_header("Content-ID", f"<{path.stem}>")
-        img.add_header("Content-Disposition", "inline", filename=path.name)
-        related.attach(img)
-    alt.attach(related)
-    msg.attach(alt)
+        related = MIMEMultipart("related")
+        related.attach(MIMEText(html, "html", "utf-8"))
+        for path in card_paths or []:
+            with path.open("rb") as f:
+                img = MIMEImage(f.read(), _subtype="png")
+            img.add_header("Content-ID", f"<{path.stem}>")
+            img.add_header("Content-Disposition", "inline", filename=path.name)
+            related.attach(img)
+        alt.attach(related)
+        msg.attach(alt)
 
-    # 再附一份 attachment，方便手機另存／轉傳
-    for path in card_paths or []:
-        with path.open("rb") as f:
-            att = MIMEImage(f.read(), _subtype="png")
-        att.add_header("Content-Disposition", "attachment", filename=path.name)
-        msg.attach(att)
+        # 再附一份 attachment，方便手機另存／轉傳
+        for path in card_paths or []:
+            with path.open("rb") as f:
+                att = MIMEImage(f.read(), _subtype="png")
+            att.add_header("Content-Disposition", "attachment", filename=path.name)
+            msg.attach(att)
+        return msg
 
+    # 逐一寄送，避免收件人互看信箱
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(email, password)
-        smtp.sendmail(email, recipients, msg.as_string())
-    print(f"收件人：{', '.join(recipients)}")
+        for to_addr in recipients:
+            smtp.sendmail(email, [to_addr], build_msg(to_addr).as_string())
+    print(f"已分別寄送至 {len(recipients)} 位收件人")
 
 def run(args: argparse.Namespace) -> int:
     today = datetime.now(TPE).date()
