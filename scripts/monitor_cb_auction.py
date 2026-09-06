@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Monitor Taiwan CB auctions; suggest bid ladders and market-cap sizing.
+"""Monitor Taiwan TWSE auctions (CB + stock); suggest bid ladders.
 
 Sources:
-- Auction list: money-link imp09_tw
+- Auction list: TWSE 競價拍賣公告
+  https://www.twse.com.tw/zh/announcement/auction.html
 - CB terms: cyclesinvest cbipo
-- Stock close: TWSE STOCK_DAY
+- Listed stock close: TWSE STOCK_DAY
+- Emerging (興櫃) price: Yahoo Finance *.TWO
 - Shares outstanding: TWSE / TPEx open data
 
 Email: UANALYZE_EMAIL + GMAIL_APP_PASSWORD
@@ -36,14 +38,15 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE_PATH = Path(os.getenv("CB_AUCTION_STATE_PATH", ROOT / ".data" / "cb_auction_state.json"))
 CARD_DIR = Path(os.getenv("CB_AUCTION_CARD_DIR", ROOT / ".data" / "cb_cards"))
 
-AUCTION_URL = "https://www.money-link.com.tw/p/?G=m&pg=imp09_tw&id="
+TWSE_AUCTION_URL = "https://www.twse.com.tw/rwd/zh/announcement/auction"
 BOND_URL = "https://www.money-link.com.tw/p/?G=m&pg=bnd001_tw&id={stock}"
 CB_IPO_URL = "https://www.cyclesinvest.com/cbipo.php"
 TWSE_COMPANY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_COMPANY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
-USER_AGENT = "Mozilla/5.0 (compatible; cb-auction-monitor/1.1)"
+USER_AGENT = "Mozilla/5.0 (compatible; twse-auction-monitor/2.0)"
 
-FACE_VALUE = 100_000  # 每張面額 10 萬
+FACE_VALUE = 100_000  # 可轉債每張面額 10 萬；股票每張 1000 股
+STOCK_LOT_SHARES = 1000
 # 市值越大、標單筆數越多（提高命中率）；小型至少 5 筆
 TICKETS_BY_TIER = {
     "micro": 5,
@@ -288,9 +291,9 @@ class CbIpoMeta:
 
 @dataclass
 class AuctionRow:
-    bond_code: str
+    bond_code: str  # 證券代號（可轉債或股票）
     name: str
-    bond_type: str
+    bond_type: str  # 發行性質
     auction_method: str
     market_label: str
     bid_period: str
@@ -316,6 +319,14 @@ class AuctionRow:
     advice: str = ""
     notes: list[str] = field(default_factory=list)
     position: PositionPlan | None = None
+    asset_kind: str = "cb"  # cb / stock
+    deposit_ratio: float = 0.5
+    max_lot: int | None = None
+    otc_price: float | None = None
+    discount_pct: float | None = None
+    quality_score: int = 50
+    sentiment_score: int = 50
+    fee_per_ticket: int = 400
 
 
 def http_json(url: str, timeout: int = 30) -> Any:
@@ -329,21 +340,46 @@ def http_text(url: str, timeout: int = 30) -> str:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
-    except Exception as exc:  # IncompleteRead / transient network
-        # 再試一次
+    except Exception:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
 
-def ts_to_date(ts: int | None) -> date | None:
-    if not ts:
+def parse_num(value: Any) -> float | None:
+    if value is None:
         return None
-    return datetime.fromtimestamp(ts, TPE).date()
+    text = str(value).replace(",", "").replace("%", "").strip()
+    if not text or text in {"-", "—", "N/A"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
-def fmt_date(ts: int | None) -> str:
-    d = ts_to_date(ts)
-    return d.isoformat() if d else "-"
+def parse_int_num(value: Any) -> int | None:
+    num = parse_num(value)
+    return int(num) if num is not None else None
+
+
+def parse_twse_date(value: str) -> date | None:
+    text = str(value or "").strip().replace("-", "/")
+    m = re.fullmatch(r"(\d{4})/(\d{1,2})/(\d{1,2})", text)
+    if not m:
+        return None
+    return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def fmt_twse_date(value: str) -> str:
+    d = parse_twse_date(value)
+    return d.isoformat() if d else (str(value or "-") or "-")
+
+
+def is_cb_issue(issue_type: str, name: str = "") -> bool:
+    text = f"{issue_type}{name}"
+    return "轉換公司債" in text or "可轉換公司債" in text or (
+        "轉換" in text and "公司債" in text
+    )
 
 
 def infer_stock_code(bond_code: str) -> str:
@@ -352,8 +388,48 @@ def infer_stock_code(bond_code: str) -> str:
 
 
 def fetch_auctions() -> list[dict[str, Any]]:
-    data = http_json(AUCTION_URL)
-    return list(data.get("result", {}).get("d1") or [])
+    """Fetch TWSE auction announcement rows as normalized dicts."""
+    data = http_json(TWSE_AUCTION_URL)
+    if data.get("stat") != "OK":
+        raise RuntimeError(f"TWSE auction API 失敗：{data.get('stat')}")
+    rows: list[dict[str, Any]] = []
+    for raw in data.get("data") or []:
+        if not isinstance(raw, list) or len(raw) < 17:
+            continue
+        issue_type = str(raw[5] or "")
+        code = str(raw[3] or "").strip()
+        name = str(raw[2] or "").strip()
+        rows.append(
+            {
+                "code": code,
+                "name": name,
+                "market": str(raw[4] or ""),
+                "issue_type": issue_type,
+                "method": str(raw[6] or ""),
+                "open_date": str(raw[1] or ""),
+                "bid_start": str(raw[7] or ""),
+                "bid_end": str(raw[8] or ""),
+                "auction_lots": parse_int_num(raw[9]),
+                "floor": parse_num(raw[10]) or 0.0,
+                "min_lot": parse_int_num(raw[11]) or 1,
+                "max_lot": parse_int_num(raw[12]),
+                "deposit_pct": parse_num(raw[13]) or 50.0,
+                "fee": parse_int_num(raw[14]) or 400,
+                "listing_date": str(raw[15] or ""),
+                "broker": str(raw[16] or ""),
+                "win_amount": parse_num(raw[17]),
+                "fee_rate": parse_num(raw[18]),
+                "qualified_apps": parse_int_num(raw[19]),
+                "qualified_lots": parse_int_num(raw[20]),
+                "min_win": parse_num(raw[21]),
+                "max_win": parse_num(raw[22]),
+                "avg_win": parse_num(raw[23]),
+                "underwrite": parse_num(raw[24]),
+                "cancelled": str(raw[25] or "").strip(),
+                "asset_kind": "cb" if is_cb_issue(issue_type, name) else "stock",
+            }
+        )
+    return rows
 
 
 def fetch_cb_ipo_table() -> dict[str, CbIpoMeta]:
@@ -399,6 +475,43 @@ def fetch_cb_ipo_table() -> dict[str, CbIpoMeta]:
     return rows
 
 
+def fetch_emerging_price(
+    stock_code: str,
+    cache: dict[str, float | None] | None = None,
+) -> float | None:
+    """興櫃／上櫃參考價（Yahoo *.TWO）。"""
+    if cache is not None and stock_code in cache:
+        return cache[stock_code]
+    price = None
+    for suffix in (".TWO", ".TW"):
+        url = (
+            "https://query1.finance.yahoo.com/v8/finance/chart/"
+            f"{stock_code}{suffix}?interval=1d&range=10d"
+        )
+        try:
+            data = http_json(url)
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+            continue
+        result = (data.get("chart") or {}).get("result") or []
+        if not result:
+            continue
+        meta = result[0].get("meta") or {}
+        raw_price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+        if raw_price:
+            price = float(raw_price)
+            break
+        closes = ((result[0].get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+        for c in reversed(closes):
+            if c:
+                price = float(c)
+                break
+        if price is not None:
+            break
+    if cache is not None:
+        cache[stock_code] = price
+    return price
+
+
 def fetch_stock_close(
     stock_code: str,
     as_of: date | None = None,
@@ -436,6 +549,8 @@ def fetch_stock_close(
                 continue
         if price is not None:
             break
+    if price is None:
+        price = fetch_emerging_price(stock_code, cache=None)
     if cache is not None:
         cache[stock_code] = price
     return price
@@ -588,18 +703,31 @@ def build_ladder_tickets(
     auction_lots: int | None,
     min_lot: int,
     n_tickets: int = 5,
+    lot_value_fn: Any | None = None,
+    max_lot: int | None = None,
 ) -> list[BidTicket]:
-    """多筆階梯標：低價多張衝便宜成本，高價少張保命中率。"""
-    total_lots = max(budget_twd // FACE_VALUE, 1)
+    """多筆階梯標：低價多張衝便宜成本，高價少張保命中率。
+
+    lot_value_fn(price, lots) -> amount_twd；預設為可轉債（面額 10 萬 × 價/100）。
+    """
+    if lot_value_fn is None:
+        lot_value_fn = lambda price, lots: int(lots * FACE_VALUE * price / 100)
+        # CB: 預算約等於張數 × 10 萬（以面額計）
+        total_lots = max(budget_twd // FACE_VALUE, 1)
+    else:
+        # 股票：用合理價估算單張金額
+        unit = max(int(fair * STOCK_LOT_SHARES), 1)
+        total_lots = max(budget_twd // unit, 1)
+
     max_per_ticket = max(int(auction_lots * 0.10), min_lot) if auction_lots else total_lots
+    if max_lot:
+        max_per_ticket = min(max_per_ticket, max_lot)
     max_per_ticket = max(max_per_ticket, min_lot)
 
     low = max(floor, bid_low)
     high = max(bid_high, low)
     fair = min(max(fair, low), high)
-    # 張數不夠時降筆數，但盡量維持目標筆數（每筆至少 min_lot）
     n_tickets = max(min(n_tickets, total_lots // max(min_lot, 1)), 1)
-    n_tickets = max(n_tickets, 1)
 
     prices: list[float] = []
     for i in range(n_tickets):
@@ -610,7 +738,6 @@ def build_ladder_tickets(
             p = fair + (high - fair) * ((t - 0.5) / 0.5)
         prices.append(round(p, 2))
 
-    # 權重：便宜檔較重（例 5 檔：5/4/3/2/1）
     raw_weights = [n_tickets - i for i in range(n_tickets)]
     weight_sum = sum(raw_weights)
     lots_list = [max(int(total_lots * w / weight_sum), 0) for w in raw_weights]
@@ -642,7 +769,7 @@ def build_ladder_tickets(
             BidTicket(
                 price=price,
                 lots=lots,
-                amount_twd=int(lots * FACE_VALUE * price / 100),
+                amount_twd=int(lot_value_fn(price, lots)),
                 role=role,
             )
         )
@@ -744,16 +871,26 @@ def fetch_bond_terms(stock_code: str, bond_code: str) -> dict[str, Any]:
     return {}
 
 
-def historical_premium_stats(raw_rows: list[dict[str, Any]]) -> dict[str, float]:
+def historical_premium_stats(
+    raw_rows: list[dict[str, Any]],
+    *,
+    asset_kind: str | None = "cb",
+) -> dict[str, float]:
+    """歷史得標溢價（相對底標）。可依 asset_kind 篩選。"""
     premiums: list[float] = []
     for row in raw_rows:
-        if row.get("v16") is None or row.get("v9") is None:
+        if asset_kind and row.get("asset_kind") != asset_kind:
             continue
-        floor = float(row["v9"])
-        if floor <= 0:
+        floor = float(row.get("floor") or 0)
+        # prefer avg_win; fall back to min_win
+        win = row.get("avg_win") or row.get("min_win")
+        if not floor or not win or float(win) <= 0:
             continue
-        premiums.append((float(row["v16"]) / floor - 1) * 100)
+        premiums.append((float(win) / floor - 1) * 100)
     if not premiums:
+        # CB / stock 預設不同（股票競拍常大幅高於底標）
+        if asset_kind == "stock":
+            return {"median": 35.0, "p25": 18.0, "p75": 70.0, "count": 0}
         return {"median": 6.0, "p25": 3.5, "p75": 12.0, "count": 0}
     premiums.sort()
     n = len(premiums)
@@ -766,20 +903,251 @@ def historical_premium_stats(raw_rows: list[dict[str, Any]]) -> dict[str, float]
 
 
 def classify_status(row: dict[str, Any], today: date) -> str:
-    if row.get("v19"):
+    if row.get("cancelled"):
         return "cancelled"
-    bid_start = ts_to_date(row.get("v20On"))
-    bid_end = ts_to_date(row.get("v21On"))
-    open_day = ts_to_date(row.get("v1On"))
+    bid_start = parse_twse_date(str(row.get("bid_start") or ""))
+    bid_end = parse_twse_date(str(row.get("bid_end") or ""))
+    open_day = parse_twse_date(str(row.get("open_date") or ""))
     if bid_start and bid_end and bid_start <= today <= bid_end:
         return "bidding"
     if bid_start and today < bid_start:
         return "upcoming"
     if open_day and today <= open_day:
         return "awaiting_result"
-    if row.get("v16"):
+    if row.get("avg_win") or row.get("min_win") or row.get("underwrite"):
         return "completed"
     return "past"
+
+
+def score_stock_quality(row: dict[str, Any], otc_price: float | None) -> tuple[int, list[str]]:
+    """粗估公司／案件體質（0-100）。"""
+    score = 55
+    notes: list[str] = []
+    issue = str(row.get("issue_type") or "")
+    floor = float(row.get("floor") or 0)
+    lots = int(row.get("auction_lots") or 0)
+
+    if "創新板" in issue:
+        score -= 8
+        notes.append("創新板案件，波動與流動性風險較高")
+    elif "第一上市" in issue or "第一上櫃" in issue:
+        score -= 5
+        notes.append("第一上市／上櫃，資訊揭露與可比性較弱")
+    elif "初上市" in issue:
+        score += 4
+        notes.append("一般板初上市，體質評分略加")
+    elif "初上櫃" in issue:
+        score += 2
+        notes.append("一般板初上櫃")
+
+    # 競拍規模：太小較易被炒、太大較穩
+    notional = floor * lots * STOCK_LOT_SHARES / 1e8  # 億
+    if notional >= 20:
+        score += 6
+        notes.append(f"競拍規模約 {notional:.1f} 億，規模較大")
+    elif notional >= 5:
+        score += 2
+    elif 0 < notional < 1.5:
+        score -= 6
+        notes.append(f"競拍規模約 {notional:.1f} 億，偏小型、投機性較高")
+
+    if otc_price and floor > 0:
+        ratio = otc_price / floor
+        if ratio >= 2.5:
+            score -= 4
+            notes.append(f"興櫃價為底標 {ratio:.1f} 倍，市場預期熱、泡沫風險上升")
+        elif ratio >= 1.5:
+            score += 3
+            notes.append(f"興櫃價為底標 {ratio:.1f} 倍，具合理溢價空間")
+        elif ratio < 1.1:
+            score -= 5
+            notes.append("興櫃價貼近底標，上檔空間有限或市場偏冷")
+
+    return max(5, min(95, score)), notes
+
+
+def score_market_sentiment(stock_stats: dict[str, float]) -> tuple[int, list[str]]:
+    """依近期股票競拍得標溢價判斷市場情緒。"""
+    median = stock_stats.get("median", 35)
+    notes: list[str] = []
+    if median >= 70:
+        score = 85
+        notes.append(f"近期股票競拍中位溢價約 {median:.0f}%，市場情緒偏熱")
+    elif median >= 40:
+        score = 68
+        notes.append(f"近期股票競拍中位溢價約 {median:.0f}%，情緒中偏熱")
+    elif median >= 20:
+        score = 52
+        notes.append(f"近期股票競拍中位溢價約 {median:.0f}%，情緒中性")
+    else:
+        score = 35
+        notes.append(f"近期股票競拍中位溢價約 {median:.0f}%，情緒偏冷、可更保守")
+    if stock_stats.get("count", 0):
+        notes.append(f"樣本 {int(stock_stats['count'])} 檔已開標股票競拍")
+    return score, notes
+
+
+def analyze_stock_bid_range(
+    floor: float,
+    otc_price: float | None,
+    stock_stats: dict[str, float],
+    quality: int,
+    sentiment: int,
+) -> tuple[float, float, float, float | None, str, list[str]]:
+    """股票競拍：依興櫃價折價 + 歷史溢價建議標價區間。"""
+    notes: list[str] = []
+    p25, median, p75 = stock_stats["p25"], stock_stats["median"], stock_stats["p75"]
+
+    # 興櫃折價：體質好／情緒熱 → 少打折；反之多打折
+    # 基準折價 18%，quality/sentiment 各可加減約 8%
+    base_discount = 0.18
+    adj = ((quality - 50) + (sentiment - 50)) / 100 * 0.16
+    discount = max(0.06, min(0.35, base_discount - adj))
+
+    if otc_price and otc_price > 0:
+        fair = otc_price * (1 - discount)
+        low = max(floor, otc_price * (1 - discount - 0.08))
+        high = max(low, otc_price * (1 - max(0.03, discount - 0.07)))
+        # 不要超過興櫃價本身
+        high = min(high, otc_price * 0.98)
+        notes.append(
+            f"興櫃／參考價 {otc_price:.2f} 元，建議相對興櫃折價約 {discount * 100:.0f}%"
+            f"（約 {(1 - discount) * 10:.1f} 折；體質 {quality}/情緒 {sentiment}）"
+        )
+        advice = (
+            "以興櫃價為錨、打適當折價階梯標；低價多張搶便宜、高價少張保命中。"
+            "興櫃轉上市仍有破發與流動性風險，勿用滿額追高。"
+        )
+    else:
+        fair = floor * (1 + median / 100)
+        low = max(floor, floor * (1 + p25 / 100))
+        high = floor * (1 + p75 / 100)
+        discount = None
+        notes.append("未取得興櫃價，改以歷史股票競拍相對底標溢價估算")
+        advice = "缺乏興櫃錨定價時，以歷史得標溢價為主，建議保守、控制總預算。"
+
+    # 歷史底標溢價上緣當 sanity check：避免低於歷史過熱時仍喊太高
+    hist_high = floor * (1 + p75 / 100)
+    if high > hist_high * 1.15 and otc_price:
+        notes.append(
+            f"建議上緣已高於歷史 P75 溢價價位 {hist_high:.2f}，留意過熱追價風險"
+        )
+
+    return (
+        round(low, 2),
+        round(max(high, low), 2),
+        round(fair, 2),
+        round(discount * 100, 1) if discount is not None else None,
+        advice,
+        notes,
+    )
+
+
+def build_stock_position_plan(
+    auction: AuctionRow,
+    quality: int,
+    sentiment: int,
+) -> PositionPlan:
+    """股票競拍部位：依案件熱度／股價級距給預算與階梯標單筆數。"""
+    floor = auction.floor_price
+    lots = auction.auction_lots or 0
+    notional_yi = floor * lots * STOCK_LOT_SHARES / 1e8 if floor and lots else 0
+    fair_est = auction.fair_value or auction.otc_price or floor or 1
+    lot_cost = max(int(fair_est * STOCK_LOT_SHARES), 1)
+
+    heat = (quality + sentiment) / 2
+    reasons: list[str] = []
+
+    # 高價股（單張成本高）改以「目標張數」定預算，才能排出多筆階梯
+    if lot_cost >= 800_000:
+        target_lots = 3
+        if heat >= 55:
+            target_lots = 5
+        if heat >= 70:
+            target_lots = 7
+        if heat >= 80:
+            target_lots = 8
+        if quality < 40:
+            target_lots = max(3, target_lots - 2)
+            reasons.append("體質偏弱，減少張數")
+        if "創新板" in auction.bond_type:
+            target_lots = max(3, target_lots - 1)
+            reasons.append("創新板風險，減少張數")
+        budget = lot_cost * target_lots
+        tier = "mid" if target_lots >= 5 else "small"
+        n_tickets = target_lots
+        reasons.append(f"高價股單張約 {lot_cost/1e4:.0f} 萬，以 {target_lots} 張規劃階梯")
+        base = budget
+    else:
+        if heat >= 75 and notional_yi >= 5:
+            tier, base = "large", 4_000_000
+        elif heat >= 60:
+            tier, base = "mid", 2_500_000
+        elif heat >= 45:
+            tier, base = "small", 1_500_000
+        else:
+            tier, base = "micro", 800_000
+        budget = base
+        if auction.otc_price and floor > 0:
+            upside = auction.otc_price / floor - 1
+            if upside >= 1.0:
+                budget = int(budget * 1.15)
+                reasons.append("興櫃相對底標空間大，部位略增")
+            elif upside < 0.25:
+                budget = int(budget * 0.75)
+                reasons.append("興櫃相對底標空間有限，部位縮減")
+        if "創新板" in auction.bond_type:
+            budget = int(budget * 0.85)
+            reasons.append("創新板風險折扣")
+        if quality < 40:
+            budget = int(budget * 0.8)
+            reasons.append("體質偏弱，降低曝險")
+        n_tickets = tickets_for_tier(tier)
+        if heat >= 70:
+            n_tickets = max(n_tickets, 7)
+        if heat >= 80:
+            n_tickets = max(n_tickets, 8)
+
+    tickets: list[BidTicket] = []
+    if auction.bid_low is not None and auction.bid_high is not None and auction.fair_value is not None:
+        tickets = build_ladder_tickets(
+            budget_twd=budget,
+            floor=auction.floor_price,
+            bid_low=auction.bid_low,
+            bid_high=auction.bid_high,
+            fair=auction.fair_value,
+            auction_lots=auction.auction_lots,
+            min_lot=auction.min_lot or 1,
+            n_tickets=n_tickets,
+            lot_value_fn=lambda price, lot: int(price * lot * STOCK_LOT_SHARES),
+            max_lot=auction.max_lot,
+        )
+
+    gross = sum(t.amount_twd for t in tickets) or budget
+    deposit = int(gross * auction.deposit_ratio)
+    zhe = None
+    if auction.discount_pct is not None:
+        zhe = (100 - auction.discount_pct) / 10  # 16% off → 8.4 折
+
+    rationale = (
+        f"股票競拍｜體質 {quality}/100、情緒 {sentiment}/100；"
+        f"基準配置 {base / 1e4:.0f} 萬"
+        + (("；" + "；".join(reasons)) if reasons else "")
+        + f"；建議 {len(tickets) or n_tickets} 筆階梯標"
+        + (f"；相對興櫃折價約 {auction.discount_pct:.0f}%（約 {zhe:.1f} 折）" if zhe else "")
+    )
+    return PositionPlan(
+        size_tier=tier,
+        market_cap_yi=notional_yi or None,
+        target_budget_twd=budget,
+        deposit_est_twd=deposit,
+        tickets=tickets,
+        rationale=rationale,
+        purpose_category="stock_ipo",
+        purpose_score=quality,
+        purpose_label="股票競拍",
+        purpose_text=auction.bond_type,
+    )
 
 
 def analyze_bid_range(
@@ -825,47 +1193,81 @@ def normalize_auction(
     bond_cache: dict[tuple[str, str], dict[str, Any]] | None = None,
     shares_map: dict[str, int] | None = None,
     purpose_cache: dict[str, PurposeInfo] | None = None,
+    stock_premium_stats: dict[str, float] | None = None,
 ) -> AuctionRow:
-    bond_code = str(row.get("v3", ""))
-    stock_code = infer_stock_code(bond_code)
-    meta = ipo_map.get(bond_code)
+    code = str(row.get("code") or "")
+    asset_kind = str(row.get("asset_kind") or "cb")
+    stock_code = code if asset_kind == "stock" else infer_stock_code(code)
+    meta = ipo_map.get(code)
     if meta and meta.stock_code:
         stock_code = meta.stock_code
 
-    floor = float(row.get("v9") or 0)
+    floor = float(row.get("floor") or 0)
+    bid_start = str(row.get("bid_start") or "")
+    bid_end = str(row.get("bid_end") or "")
+    bid_period = f"{bid_start.replace('/', '-')}~{bid_end.replace('/', '-')}"
     auction = AuctionRow(
-        bond_code=bond_code,
-        name=str(row.get("v2", "")),
-        bond_type=str(row.get("v4", "")),
-        auction_method=str(row.get("v5", "")),
-        market_label=str(row.get("v4", "")),
-        bid_period=str(row.get("v6", "")),
-        open_date=fmt_date(row.get("v1On")),
-        listing_date=fmt_date(row.get("v11On")),
-        broker=str(row.get("v12", "")),
-        auction_lots=int(row["v8"] // 1000) if row.get("v8") else None,
+        bond_code=code,
+        name=str(row.get("name") or ""),
+        bond_type=str(row.get("issue_type") or ""),
+        auction_method=str(row.get("method") or ""),
+        market_label=str(row.get("market") or ""),
+        bid_period=bid_period,
+        open_date=fmt_twse_date(str(row.get("open_date") or "")),
+        listing_date=fmt_twse_date(str(row.get("listing_date") or "")),
+        broker=str(row.get("broker") or ""),
+        auction_lots=row.get("auction_lots"),
         floor_price=floor,
-        min_lot=int(row.get("v10") or 1),
-        min_win_price=float(row["v16"]) if row.get("v16") is not None else None,
-        max_win_price=float(row["v17"]) if row.get("v17") is not None else None,
-        underwriting_price=float(row["v18"]) if row.get("v18") is not None else None,
-        cancelled=str(row.get("v19") or ""),
+        min_lot=int(row.get("min_lot") or 1),
+        min_win_price=row.get("min_win"),
+        max_win_price=row.get("max_win"),
+        underwriting_price=row.get("underwrite"),
+        cancelled=str(row.get("cancelled") or ""),
         status=classify_status(row, today),
         stock_code=stock_code,
         meta=meta,
+        asset_kind=asset_kind,
+        deposit_ratio=(float(row.get("deposit_pct") or 50) / 100.0),
+        max_lot=row.get("max_lot"),
+        fee_per_ticket=int(row.get("fee") or 400),
     )
 
     if not enrich:
         return auction
 
+    if asset_kind == "stock":
+        otc = fetch_emerging_price(stock_code, stock_cache)
+        auction.otc_price = otc
+        auction.stock_price = otc
+        quality, q_notes = score_stock_quality(row, otc)
+        sentiment, s_notes = score_market_sentiment(stock_premium_stats or historical_premium_stats([], asset_kind="stock"))
+        auction.quality_score = quality
+        auction.sentiment_score = sentiment
+        low, high, fair, discount, advice, notes = analyze_stock_bid_range(
+            floor, otc, stock_premium_stats or historical_premium_stats([], asset_kind="stock"), quality, sentiment
+        )
+        auction.bid_low = low
+        auction.bid_high = high
+        auction.fair_value = fair
+        auction.discount_pct = discount
+        auction.advice = advice
+        auction.notes.extend(notes)
+        auction.notes.extend(q_notes)
+        auction.notes.extend(s_notes)
+        if auction.auction_lots:
+            auction.notes.insert(0, f"競拍張數 {auction.auction_lots:,}｜單標上限 {auction.max_lot or '-'} 張")
+        auction.position = build_stock_position_plan(auction, quality, sentiment)
+        return auction
+
+    # ---- CB path (保留原估值／用途／部位邏輯) ----
     conversion = meta.conversion_price if meta and meta.conversion_price else None
     putback = None
     if stock_code:
-        cache_key = (stock_code, bond_code)
+        cache_key = (stock_code, code)
         if bond_cache is not None and cache_key in bond_cache:
             bond_terms = bond_cache[cache_key]
         else:
-            bond_terms = fetch_bond_terms(stock_code, bond_code)
+            bond_terms = fetch_bond_terms(stock_code, code)
             if bond_cache is not None:
                 bond_cache[cache_key] = bond_terms
         if bond_terms.get("v28"):
@@ -916,14 +1318,13 @@ def detect_alerts(
     reasons: list[str] = []
     prev_map = previous.get("auctions", {})
     for item in current:
-        if "轉換公司債" not in item.bond_type and "轉換" not in item.name:
-            continue
         if item.status in ("cancelled", "completed", "past"):
             continue
+        kind = "可轉債" if item.asset_kind == "cb" else "股票"
         prev = prev_map.get(item.bond_code)
         if prev is None:
             alerts.append(item)
-            reasons.append(f"新標的：{item.name} ({item.bond_code})")
+            reasons.append(f"新{kind}標的：{item.name} ({item.bond_code})")
             continue
         if prev.get("status") != item.status and item.status in (
             "bidding",
@@ -933,16 +1334,18 @@ def detect_alerts(
             alerts.append(item)
             reasons.append(f"狀態變更：{item.name} {prev.get('status')} -> {item.status}")
         elif item.status == "bidding" and (
-            prev.get("bid_low") != item.bid_low or prev.get("stock_price") != item.stock_price
+            prev.get("bid_low") != item.bid_low
+            or prev.get("stock_price") != item.stock_price
+            or prev.get("otc_price") != item.otc_price
         ):
             alerts.append(item)
-            reasons.append(f"投標中更新：{item.name} 股價/估值已更新")
+            reasons.append(f"投標中更新：{item.name} 價格／估值已更新")
     return alerts, reasons
 
 
 def format_tickets(plan: PositionPlan) -> list[str]:
     lines = [
-        f"  部位建議：{plan.target_budget_twd / 1e4:.0f} 萬（市值部位）"
+        f"  部位建議：{plan.target_budget_twd / 1e4:.0f} 萬"
         f" | 預估保證金約 {plan.deposit_est_twd / 1e4:.0f} 萬",
         f"  配置理由：{plan.rationale}",
     ]
@@ -964,10 +1367,18 @@ def format_tickets(plan: PositionPlan) -> list[str]:
 
 
 def format_auction_lines(a: AuctionRow) -> list[str]:
+    kind = "可轉債" if a.asset_kind == "cb" else "股票競拍"
     lines = [
-        f"{a.name} ({a.bond_code}) / 正股 {a.stock_code or '-'} / 狀態 {a.status}",
+        f"[{kind}] {a.name} ({a.bond_code}) / {a.bond_type} / 狀態 {a.status}",
         f"  投標期間：{a.bid_period} | 開標：{a.open_date} | 底標：{a.floor_price:.2f}",
     ]
+    if a.asset_kind == "stock" and a.otc_price:
+        disc = (
+            f"（折價約 {a.discount_pct:.0f}%／約 {(100 - a.discount_pct) / 10:.1f} 折）"
+            if a.discount_pct is not None
+            else ""
+        )
+        lines.append(f"  興櫃／參考價：{a.otc_price:.2f} 元{disc}")
     if a.bid_low is not None and a.bid_high is not None and a.fair_value is not None:
         lines.append(
             f"  建議投標區間：{a.bid_low:.2f} ~ {a.bid_high:.2f} 元"
@@ -985,7 +1396,8 @@ def render_text_report(
     alerts: list[AuctionRow], all_active: list[AuctionRow], reasons: list[str]
 ) -> str:
     lines = [
-        "可轉債競拍監控報告",
+        "TWSE 競價拍賣監控報告（可轉債 + 股票）",
+        "來源：https://www.twse.com.tw/zh/announcement/auction.html",
         f"產生時間：{datetime.now(TPE):%Y-%m-%d %H:%M} (Asia/Taipei)",
         "",
     ]
@@ -1058,32 +1470,54 @@ def render_share_card(auction: AuctionRow, out_path: Path) -> Path:
         return box[2] - box[0]
 
     y = 36
-    draw.text((48, y), "可轉債競拍建議", fill=accent, font=font_small)
+    title_kind = "可轉債競拍建議" if auction.asset_kind == "cb" else "股票競拍建議"
+    draw.text((48, y), title_kind, fill=accent, font=font_small)
     y += 42
     title = f"{auction.name}  {auction.bond_code}"
     draw.text((48, y), title, fill=text, font=font_title)
     y += 70
-    draw.text(
-        (48, y),
-        f"正股 {auction.stock_code or '-'}　投標 {auction.bid_period}　開標 {auction.open_date}",
-        fill=muted,
-        font=font_small,
-    )
+    if auction.asset_kind == "stock":
+        sub = (
+            f"{auction.bond_type}　投標 {auction.bid_period}　開標 {auction.open_date}"
+        )
+    else:
+        sub = (
+            f"正股 {auction.stock_code or '-'}　投標 {auction.bid_period}　開標 {auction.open_date}"
+        )
+    draw.text((48, y), sub, fill=muted, font=font_small)
     y += 48
 
     # 重點數據列
-    purpose_lbl = plan.purpose_label if plan else "用途未明"
-    purpose_score = plan.purpose_score if plan else 50
-    metrics = [
-        ("底標", f"{auction.floor_price:.2f}"),
-        ("建議區間", f"{auction.bid_low:.2f}–{auction.bid_high:.2f}" if auction.bid_low else "-"),
-        ("合理價", f"{auction.fair_value:.2f}" if auction.fair_value else "-"),
-        ("部位", f"{(plan.target_budget_twd / 1e4):.0f} 萬" if plan else "-"),
-    ]
-    # 額外一行：資金用途評分
-    purpose_line = f"資金用途：{purpose_lbl}（{purpose_score}/100）"
-    if plan and plan.purpose_text:
-        purpose_line += f"｜{plan.purpose_text}"
+    if auction.asset_kind == "stock":
+        purpose_line = (
+            f"興櫃／參考 {auction.otc_price:.2f} 元"
+            if auction.otc_price
+            else "興櫃價未取得"
+        )
+        if auction.discount_pct is not None:
+            purpose_line += (
+                f"｜折價約 {auction.discount_pct:.0f}%"
+                f"（{(100 - auction.discount_pct) / 10:.1f} 折）"
+            )
+        purpose_line += f"｜體質 {auction.quality_score}/情緒 {auction.sentiment_score}"
+        metrics = [
+            ("底標", f"{auction.floor_price:.2f}"),
+            ("建議區間", f"{auction.bid_low:.2f}–{auction.bid_high:.2f}" if auction.bid_low else "-"),
+            ("合理價", f"{auction.fair_value:.2f}" if auction.fair_value else "-"),
+            ("部位", f"{(plan.target_budget_twd / 1e4):.0f} 萬" if plan else "-"),
+        ]
+    else:
+        purpose_lbl = plan.purpose_label if plan else "用途未明"
+        purpose_score = plan.purpose_score if plan else 50
+        purpose_line = f"資金用途：{purpose_lbl}（{purpose_score}/100）"
+        if plan and plan.purpose_text:
+            purpose_line += f"｜{plan.purpose_text}"
+        metrics = [
+            ("底標", f"{auction.floor_price:.2f}"),
+            ("建議區間", f"{auction.bid_low:.2f}–{auction.bid_high:.2f}" if auction.bid_low else "-"),
+            ("合理價", f"{auction.fair_value:.2f}" if auction.fair_value else "-"),
+            ("部位", f"{(plan.target_budget_twd / 1e4):.0f} 萬" if plan else "-"),
+        ]
     box_w = (width - 48 * 2 - 18 * 3) // 4
     for i, (label, value) in enumerate(metrics):
         x = 48 + i * (box_w + 18)
@@ -1155,7 +1589,8 @@ def generate_share_cards(auctions: list[AuctionRow]) -> list[tuple[AuctionRow, P
     for a in auctions:
         if not a.position or not a.position.tickets:
             continue
-        path = CARD_DIR / f"cb_{a.bond_code}_{stamp}.png"
+        prefix = "cb" if a.asset_kind == "cb" else "stk"
+        path = CARD_DIR / f"{prefix}_{a.bond_code}_{stamp}.png"
         results.append((a, render_share_card(a, path)))
     return results
 
@@ -1163,8 +1598,9 @@ def generate_share_cards(auctions: list[AuctionRow]) -> list[tuple[AuctionRow, P
 def render_html_report(text: str, alerts: list[AuctionRow], card_cids: list[tuple[str, str]] | None = None) -> str:
     parts = [
         "<html><body style='font-family:sans-serif;line-height:1.5;color:#111;'>",
-        "<h2>可轉債競拍監控報告</h2>",
+        "<h2>TWSE 競價拍賣監控（可轉債 + 股票）</h2>",
         f"<p>產生時間：{escape(datetime.now(TPE).strftime('%Y-%m-%d %H:%M'))} (Asia/Taipei)</p>",
+        "<p>資料來源：<a href='https://www.twse.com.tw/zh/announcement/auction.html'>證交所競價拍賣公告</a></p>",
         "<p>下方附上可分享圖卡（也可直接轉傳附件 PNG）。</p>",
     ]
     if card_cids:
@@ -1246,7 +1682,8 @@ def run(args: argparse.Namespace) -> int:
     today = datetime.now(TPE).date()
     raw = fetch_auctions()
     ipo_map = fetch_cb_ipo_table()
-    premium_stats = historical_premium_stats(raw)
+    cb_stats = historical_premium_stats(raw, asset_kind="cb")
+    stock_stats = historical_premium_stats(raw, asset_kind="stock")
     shares_map = load_shares_outstanding()
 
     stock_cache: dict[str, float | None] = {}
@@ -1254,32 +1691,30 @@ def run(args: argparse.Namespace) -> int:
     purpose_cache: dict[str, PurposeInfo] = {}
     today_rows: list[AuctionRow] = []
     for row in raw:
-        basic = normalize_auction(row, ipo_map, premium_stats, today, enrich=False)
-        if "轉換" not in basic.bond_type and "轉換" not in basic.name:
-            continue
+        basic = normalize_auction(row, ipo_map, cb_stats, today, enrich=False)
         enrich = basic.status in ("bidding", "upcoming", "awaiting_result")
         today_rows.append(
             normalize_auction(
                 row,
                 ipo_map,
-                premium_stats,
+                cb_stats if basic.asset_kind == "cb" else stock_stats,
                 today,
                 enrich=enrich,
                 stock_cache=stock_cache,
                 bond_cache=bond_cache,
-                shares_map=shares_map if enrich else None,
-                purpose_cache=purpose_cache if enrich else None,
+                shares_map=shares_map if enrich and basic.asset_kind == "cb" else None,
+                purpose_cache=purpose_cache if enrich and basic.asset_kind == "cb" else None,
+                stock_premium_stats=stock_stats,
             )
         )
 
     active = [a for a in today_rows if a.status in ("bidding", "upcoming", "awaiting_result")]
     state = load_state()
     alerts, reasons = detect_alerts(today_rows, state)
-    focus = alerts if alerts else active[:3]
+    focus = alerts if alerts else active[:5]
     report = render_text_report(focus, active, reasons)
     print(report)
 
-    # 產生可分享圖卡（dry-run 也會產出，方便檢查）
     card_pairs = generate_share_cards(focus)
     card_paths = [p for _, p in card_pairs]
     if card_paths:
@@ -1289,7 +1724,7 @@ def run(args: argparse.Namespace) -> int:
 
     should_notify = args.force_notify or (args.notify and bool(alerts))
     if should_notify and not args.dry_run:
-        subject = "[可轉債競拍]"
+        subject = "[TWSE競拍]"
         if alerts:
             subject += f" {alerts[0].name} 等 {len(alerts)} 檔需關注"
         else:
@@ -1297,7 +1732,7 @@ def run(args: argparse.Namespace) -> int:
         card_cids = [(p.stem, f"{a.name} ({a.bond_code})") for a, p in card_pairs]
         html = render_html_report(report, focus, card_cids=card_cids)
         send_email(subject, report, html, card_paths=card_paths)
-        print(f"\n已寄送 Email（含圖卡）至 {os.environ.get('UANALYZE_EMAIL')}（含額外收件人）")
+        print(f"\n已寄送 Email（含圖卡）")
 
     if not args.dry_run:
         save_state(
