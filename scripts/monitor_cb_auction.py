@@ -701,12 +701,12 @@ def _ladder_weights(n: int, mode: str) -> list[float]:
         return [1.0]
     if mode == "cheap_heavy":
         return [float(n - i) for i in range(n)]
-    # fill_first：峰値約在中段（合理價），略偏清算帶、少堆在最高保險倉
-    peak = 0.48 * (n - 1)
+    # fill_first：峰値略偏合理價中上段，提高落在清算帶以上的張數占比
+    peak = 0.52 * (n - 1)
     weights: list[float] = []
     for i in range(n):
         dist = abs(i - peak)
-        weights.append(max(1.0, n * 1.05 - dist * 1.55))
+        weights.append(max(1.0, n * 1.05 - dist * 1.45))
     return weights
 
 
@@ -839,7 +839,7 @@ def build_ladder_tickets(
         # 讓多數得標張數落在全場均價之下。
         beat_cap = market_avg_cap
         if market_avg_cap is not None:
-            beat_cap = min(market_avg_cap, fair * 1.008)
+            beat_cap = min(market_avg_cap, fair * 1.004)
         lots_list = _rebalance_lots_for_beat_avg(
             prices,
             lots_list,
@@ -1383,7 +1383,7 @@ def analyze_bid_range(
 
     if parity is not None and parity >= 100:
         fair = min(parity * 0.985, clear_est * 1.008, market_avg * 0.992)
-        low = max(floor, min(clear_est * 0.975, fair * 0.97))
+        low = max(floor, min(clear_est * 0.988, fair * 0.975))
         high = max(min(parity * 1.015, market_avg * 1.03), clear_est * 1.04)
         advice = (
             "價內標的：以提高命中率為主，標單集中在預估清算價～全場均價附近；"
@@ -1392,10 +1392,11 @@ def analyze_bid_range(
         notes.append(f"轉換價值 {parity:.1f}%，屬價內標的。")
     else:
         fair = min(clear_est * 1.008, market_avg * 0.992)
-        low = max(floor, clear_est * 0.975, floor * (1 + min_p25 / 100 * 0.85))
+        # 下緣貼近清算帶，減少「絕對到不了」的過低標
+        low = max(floor, clear_est * 0.988, floor * (1 + min_p25 / 100 * 0.9))
         high = max(market_avg * 1.018, clear_est * 1.045, floor * (1 + min_p75 / 100 * 0.9))
         # 上緣不要被高分位拉太高（命中靠集中，不靠追最高）
-        high = min(high, market_avg * 1.04)
+        high = min(high, market_avg * 1.035)
         high = max(high, fair + max(floor * 0.01, 1.0))
         advice = (
             "策略偏命中率：寧可少賺一點，標單集中預估清算附近；"
@@ -1611,10 +1612,15 @@ def format_tickets(plan: PositionPlan) -> list[str]:
         avg = sum(t.price * t.lots for t in plan.tickets) / max(
             sum(t.lots for t in plan.tickets), 1
         )
-        lines.append(
-            f"  加權平均投標價約 {avg:.2f} 元；"
-            "張數集中合理價附近以提高命中率，目標得標均價低於全場均價。"
-        )
+        if plan.purpose_category == "stock_ipo":
+            lines.append(
+                f"  加權平均投標價約 {avg:.2f} 元；低價多張搶便宜、高價少張保命中。"
+            )
+        else:
+            lines.append(
+                f"  加權平均投標價約 {avg:.2f} 元；"
+                "張數集中合理價附近以提高命中率，目標得標均價低於全場均價。"
+            )
     return lines
 
 
