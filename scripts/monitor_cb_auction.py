@@ -316,6 +316,8 @@ class AuctionRow:
     bid_low: float | None = None
     bid_high: float | None = None
     fair_value: float | None = None
+    est_market_avg: float | None = None  # 預估全場得標均價
+    est_clear_price: float | None = None  # 預估最低得標／清算價
     advice: str = ""
     notes: list[str] = field(default_factory=list)
     position: PositionPlan | None = None
@@ -693,6 +695,79 @@ def tickets_for_tier(tier: str) -> int:
     return TICKETS_BY_TIER.get(tier, 5)
 
 
+def _ladder_weights(n: int, mode: str) -> list[float]:
+    """cheap_heavy：低價多張；fill_first：張數集中在合理價附近以提高命中率。"""
+    if n <= 1:
+        return [1.0]
+    if mode == "cheap_heavy":
+        return [float(n - i) for i in range(n)]
+    # fill_first：峰値略偏合理價中上段，提高落在清算帶以上的張數占比
+    peak = 0.52 * (n - 1)
+    weights: list[float] = []
+    for i in range(n):
+        dist = abs(i - peak)
+        weights.append(max(1.0, n * 1.05 - dist * 1.45))
+    return weights
+
+
+def _rebalance_lots_for_beat_avg(
+    prices: list[float],
+    lots_list: list[int],
+    *,
+    market_avg_cap: float | None,
+    fair: float,
+    min_lot: int,
+) -> list[int]:
+    """把過高價張數往合理價附近挪，目標投標／得標均價低於預估全場均價。"""
+    if not market_avg_cap or market_avg_cap <= 0 or not lots_list:
+        return lots_list
+    lots = list(lots_list)
+    n = len(lots)
+    below = [i for i, p in enumerate(prices) if p <= market_avg_cap + 1e-9]
+    if not below:
+        return lots
+
+    def recv_idx() -> int:
+        # 優先落到最接近合理價、且不高於全場均價的標單
+        return min(below, key=lambda i: (abs(prices[i] - fair), -prices[i]))
+
+    # 高於目標均價的張數合計不超过約 8%（保險倉）
+    total = sum(lots)
+    if total > 0:
+        above_cap = max(int(total * 0.08), min_lot)
+        above_idx = [i for i, p in enumerate(prices) if p > market_avg_cap]
+        above_lots = sum(lots[i] for i in above_idx)
+        while above_lots > above_cap:
+            donor = max(above_idx, key=lambda i: lots[i])
+            if lots[donor] <= min_lot:
+                break
+            lots[donor] -= 1
+            lots[recv_idx()] += 1
+            above_lots -= 1
+
+    def vwap() -> float:
+        s = sum(lots)
+        return sum(prices[i] * lots[i] for i in range(n)) / max(s, 1)
+
+    # 整包加權均價壓到預估全場均價的 99.5% 以下
+    guard = 0
+    target = market_avg_cap * 0.995
+    while vwap() > target and guard < 10_000:
+        guard += 1
+        donors = [i for i in range(n) if prices[i] > fair and lots[i] > min_lot]
+        if not donors:
+            donors = [i for i in range(n) if lots[i] > min_lot and prices[i] > prices[recv_idx()]]
+        if not donors:
+            break
+        donor = max(donors, key=lambda i: prices[i])
+        recv = recv_idx()
+        if donor == recv:
+            break
+        lots[donor] -= 1
+        lots[recv] += 1
+    return lots
+
+
 def build_ladder_tickets(
     *,
     budget_twd: int,
@@ -705,8 +780,13 @@ def build_ladder_tickets(
     n_tickets: int = 5,
     lot_value_fn: Any | None = None,
     max_lot: int | None = None,
+    weight_mode: str = "fill_first",
+    market_avg_cap: float | None = None,
 ) -> list[BidTicket]:
-    """多筆階梯標：低價多張衝便宜成本，高價少張保命中率。
+    """多筆階梯標。
+
+    fill_first（預設／可轉債）：張數集中合理價附近，提高命中率，並讓加權均價低於預估全場均價。
+    cheap_heavy（股票等）：低價多張衝便宜成本，高價少張保命中率。
 
     lot_value_fn(price, lots) -> amount_twd；預設為可轉債（面額 10 萬 × 價/100）。
     """
@@ -738,12 +818,14 @@ def build_ladder_tickets(
             p = fair + (high - fair) * ((t - 0.5) / 0.5)
         prices.append(round(p, 2))
 
-    raw_weights = [n_tickets - i for i in range(n_tickets)]
+    raw_weights = _ladder_weights(n_tickets, weight_mode)
     weight_sum = sum(raw_weights)
     lots_list = [max(int(total_lots * w / weight_sum), 0) for w in raw_weights]
     leftover = total_lots - sum(lots_list)
     if leftover > 0:
-        lots_list[0] += leftover
+        # 餘數優先加在權重最高（fill_first 峰値）的標單
+        peak_i = max(range(n_tickets), key=lambda j: raw_weights[j])
+        lots_list[peak_i] += leftover
 
     for i in range(n_tickets):
         if lots_list[i] == 0 and total_lots >= min_lot * (i + 1):
@@ -751,6 +833,20 @@ def build_ladder_tickets(
             if lots_list[donor] > min_lot:
                 lots_list[donor] -= min_lot
                 lots_list[i] += min_lot
+
+    if weight_mode == "fill_first":
+        # 再平衡以上限取「預估全場均價」與「合理價略上方」較低者，
+        # 讓多數得標張數落在全場均價之下。
+        beat_cap = market_avg_cap
+        if market_avg_cap is not None:
+            beat_cap = min(market_avg_cap, fair * 1.004)
+        lots_list = _rebalance_lots_for_beat_avg(
+            prices,
+            lots_list,
+            market_avg_cap=beat_cap,
+            fair=fair,
+            min_lot=min_lot,
+        )
 
     tickets: list[BidTicket] = []
     for i, (price, lots) in enumerate(zip(prices, lots_list)):
@@ -826,6 +922,8 @@ def build_position_plan(
             auction_lots=auction.auction_lots,
             min_lot=auction.min_lot or 1,
             n_tickets=n_tickets,
+            weight_mode="fill_first",
+            market_avg_cap=auction.est_market_avg,
         )
 
     gross = sum(t.amount_twd for t in tickets) or int(budget * (auction.fair_value or 100) / 100)
@@ -844,7 +942,7 @@ def build_position_plan(
         f"市值約 {cap_txt} → {tier_label}股，基準配置 {base / 1e4:.0f} 萬；"
         + ("；".join(reasons) if reasons else "無額外加減碼")
         + f"。資金用途評分 {purpose.score}/100（{purpose.label}）；"
-        + f"建議 {len(tickets) or n_tickets} 筆階梯標：低價衝便宜成本、高價保命中率。"
+        + f"建議 {len(tickets) or n_tickets} 筆階梯標：張數集中合理價附近以提高命中率，目標得標均價低於全場。"
     )
     return PositionPlan(
         size_tier=tier,
@@ -871,35 +969,133 @@ def fetch_bond_terms(stock_code: str, bond_code: str) -> dict[str, Any]:
     return {}
 
 
+def _percentile(sorted_vals: list[float], p: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    idx = min(max(int(len(sorted_vals) * p), 0), len(sorted_vals) - 1)
+    return sorted_vals[idx]
+
+
 def historical_premium_stats(
     raw_rows: list[dict[str, Any]],
     *,
     asset_kind: str | None = "cb",
 ) -> dict[str, float]:
-    """歷史得標溢價（相對底標）。可依 asset_kind 篩選。"""
+    """歷史得標溢價（相對底標，優先 avg_win）。可依 asset_kind 篩選。"""
     premiums: list[float] = []
     for row in raw_rows:
         if asset_kind and row.get("asset_kind") != asset_kind:
             continue
         floor = float(row.get("floor") or 0)
-        # prefer avg_win; fall back to min_win
         win = row.get("avg_win") or row.get("min_win")
         if not floor or not win or float(win) <= 0:
             continue
         premiums.append((float(win) / floor - 1) * 100)
     if not premiums:
-        # CB / stock 預設不同（股票競拍常大幅高於底標）
         if asset_kind == "stock":
             return {"median": 35.0, "p25": 18.0, "p75": 70.0, "count": 0}
         return {"median": 6.0, "p25": 3.5, "p75": 12.0, "count": 0}
     premiums.sort()
-    n = len(premiums)
     return {
-        "median": premiums[n // 2],
-        "p25": premiums[max(0, n // 4)],
-        "p75": premiums[min(n - 1, (3 * n) // 4)],
-        "count": n,
+        "median": _percentile(premiums, 0.5),
+        "p25": _percentile(premiums, 0.25),
+        "p75": _percentile(premiums, 0.75),
+        "count": float(len(premiums)),
     }
+
+
+def historical_win_stats(
+    raw_rows: list[dict[str, Any]],
+    *,
+    asset_kind: str | None = "cb",
+    min_auction_lots: int | None = None,
+) -> dict[str, float]:
+    """分別統計最低得標／得標均價相對底標溢價。"""
+    avg_prems: list[float] = []
+    min_prems: list[float] = []
+    for row in raw_rows:
+        if asset_kind and row.get("asset_kind") != asset_kind:
+            continue
+        lots = int(row.get("auction_lots") or 0)
+        if min_auction_lots and lots < min_auction_lots:
+            continue
+        floor = float(row.get("floor") or 0)
+        if not floor:
+            continue
+        avg = row.get("avg_win")
+        mn = row.get("min_win")
+        if avg and float(avg) > 0:
+            avg_prems.append((float(avg) / floor - 1) * 100)
+        if mn and float(mn) > 0:
+            min_prems.append((float(mn) / floor - 1) * 100)
+    if not avg_prems:
+        base = historical_premium_stats(raw_rows, asset_kind=asset_kind)
+        return {
+            "avg_median": base["median"],
+            "avg_p25": base["p25"],
+            "avg_p75": base["p75"],
+            "min_median": max(base["median"] - 3.0, base["p25"]),
+            "min_p25": max(base["p25"] - 2.0, 0.0),
+            "min_p75": base["median"],
+            "count": base["count"],
+        }
+    avg_prems.sort()
+    min_prems = sorted(min_prems) if min_prems else list(avg_prems)
+    return {
+        "avg_median": _percentile(avg_prems, 0.5),
+        "avg_p25": _percentile(avg_prems, 0.25),
+        "avg_p75": _percentile(avg_prems, 0.75),
+        "min_median": _percentile(min_prems, 0.5),
+        "min_p25": _percentile(min_prems, 0.25),
+        "min_p75": _percentile(min_prems, 0.75),
+        "count": float(len(avg_prems)),
+    }
+
+
+def peer_lot_floor(auction_lots: int | None) -> int | None:
+    """依本案競拍張數，選可比歷史樣本的最小張數門檻。"""
+    if not auction_lots:
+        return None
+    if auction_lots >= 20_000:
+        return 10_000
+    if auction_lots >= 10_000:
+        return 5_000
+    if auction_lots >= 3_000:
+        return 1_000
+    return None
+
+
+def blended_cb_win_stats(
+    raw_rows: list[dict[str, Any]],
+    auction_lots: int | None,
+) -> dict[str, float]:
+    """全體樣本與同規模樣本加權，避免大型案低估熱度、小型案過度追高。"""
+    all_stats = historical_win_stats(raw_rows, asset_kind="cb")
+    lot_floor = peer_lot_floor(auction_lots)
+    if not lot_floor:
+        return all_stats
+    size_stats = historical_win_stats(
+        raw_rows, asset_kind="cb", min_auction_lots=lot_floor
+    )
+    if size_stats["count"] < 8:
+        return all_stats
+    if auction_lots and auction_lots >= 20_000:
+        w = 0.65
+    elif auction_lots and auction_lots >= 10_000:
+        w = 0.55
+    else:
+        w = 0.40
+    out: dict[str, float] = {"count": size_stats["count"]}
+    for key in (
+        "avg_median",
+        "avg_p25",
+        "avg_p75",
+        "min_median",
+        "min_p25",
+        "min_p75",
+    ):
+        out[key] = w * size_stats[key] + (1.0 - w) * all_stats[key]
+    return out
 
 
 def classify_status(row: dict[str, Any], today: date) -> str:
@@ -1121,6 +1317,7 @@ def build_stock_position_plan(
             n_tickets=n_tickets,
             lot_value_fn=lambda price, lot: int(price * lot * STOCK_LOT_SHARES),
             max_lot=auction.max_lot,
+            weight_mode="cheap_heavy",
         )
 
     gross = sum(t.amount_twd for t in tickets) or budget
@@ -1155,31 +1352,80 @@ def analyze_bid_range(
     parity: float | None,
     premium_stats: dict[str, float],
     putback: float | None = None,
-) -> tuple[float, float, float, str, list[str]]:
+    win_stats: dict[str, float] | None = None,
+) -> tuple[float, float, float, float, float, str, list[str]]:
+    """回傳 low, high, fair, est_market_avg, est_clear, advice, notes。
+
+    策略：寧可少賺一點也提高命中率，並讓得標均價目標低於預估全場均價。
+    核心想法：多數張數放在「預估清算價 ~ 全場均價」下半段，少量保險倉略高於均價。
+    """
     notes: list[str] = []
-    p25 = premium_stats["p25"]
-    median = premium_stats["median"]
-    p75 = premium_stats["p75"]
+    if win_stats:
+        avg_med = win_stats["avg_median"]
+        avg_p25 = win_stats["avg_p25"]
+        avg_p75 = win_stats["avg_p75"]
+        min_med = win_stats["min_median"]
+        min_p25 = win_stats["min_p25"]
+        min_p75 = win_stats["min_p75"]
+    else:
+        avg_med = premium_stats["median"]
+        avg_p25 = premium_stats["p25"]
+        avg_p75 = premium_stats["p75"]
+        min_med = max(avg_med - 3.0, avg_p25)
+        min_p25 = max(avg_p25 - 2.0, 0.0)
+        min_p75 = avg_med
+
+    # 清算價略打折，避免大型案同規模溢價把核心倉推到全場均價之上
+    clear_raw = floor * (1 + min_med / 100)
+    clear_est = clear_raw * 0.99
+    # 歷史上得標均價約 = 最低得標 × 1.022；再與直接均價溢價取較保守者
+    market_avg = min(clear_est * 1.022, floor * (1 + avg_med / 100))
 
     if parity is not None and parity >= 100:
-        fair = min(parity, floor * (1 + median / 100))
-        low = max(floor, min(parity * 0.98, fair * 0.97))
-        high = min(parity * 1.02, fair * 1.03)
-        advice = "轉換價值高於面額，可偏重轉股價值，但仍留意股價波動與競標熱度。"
+        fair = min(parity * 0.985, clear_est * 1.008, market_avg * 0.992)
+        low = max(floor, min(clear_est * 0.988, fair * 0.975))
+        high = max(min(parity * 1.015, market_avg * 1.03), clear_est * 1.04)
+        advice = (
+            "價內標的：以提高命中率為主，標單集中在預估清算價～全場均價附近；"
+            "目標得標均價低於全場均價。"
+        )
         notes.append(f"轉換價值 {parity:.1f}%，屬價內標的。")
     else:
-        fair = floor * (1 + median / 100)
-        low = max(floor, floor * (1 + p25 / 100))
-        high = floor * (1 + p75 / 100)
-        advice = "目前偏債性，建議以底標加歷史得標溢價為主，不建議追高過度偏離債底。"
+        fair = min(clear_est * 1.008, market_avg * 0.992)
+        # 下緣貼近清算帶，減少「絕對到不了」的過低標
+        low = max(floor, clear_est * 0.988, floor * (1 + min_p25 / 100 * 0.9))
+        high = max(market_avg * 1.018, clear_est * 1.045, floor * (1 + min_p75 / 100 * 0.9))
+        # 上緣不要被高分位拉太高（命中靠集中，不靠追最高）
+        high = min(high, market_avg * 1.035)
+        high = max(high, fair + max(floor * 0.01, 1.0))
+        advice = (
+            "策略偏命中率：寧可少賺一點，標單集中預估清算附近；"
+            "目標得標均價低於全場競拍均價。"
+        )
         if parity is not None:
             notes.append(f"轉換價值 {parity:.1f}%，屬價外，主要受底標與信用/賣回條件支撐。")
+
+    notes.append(f"預估最低得標約 {clear_est:.2f}｜預估全場均價約 {market_avg:.2f}")
+    notes.append(
+        f"歷史溢價樣本：均價中位 {avg_med:.1f}%／清算中位 {min_med:.1f}%"
+        f"（P25~P75 均價 {avg_p25:.1f}%~{avg_p75:.1f}%）"
+    )
 
     if putback and putback > floor:
         notes.append(f"賣回價 {putback:.2f} 元，可視為軟性下限參考。")
         low = max(low, min(putback, floor * 1.01))
 
-    return round(low, 2), round(max(high, low), 2), round(fair, 2), advice, notes
+    low = min(low, fair)
+    high = max(high, fair)
+    return (
+        round(low, 2),
+        round(high, 2),
+        round(fair, 2),
+        round(market_avg, 2),
+        round(clear_est, 2),
+        advice,
+        notes,
+    )
 
 
 def normalize_auction(
@@ -1194,6 +1440,7 @@ def normalize_auction(
     shares_map: dict[str, int] | None = None,
     purpose_cache: dict[str, PurposeInfo] | None = None,
     stock_premium_stats: dict[str, float] | None = None,
+    raw_rows: list[dict[str, Any]] | None = None,
 ) -> AuctionRow:
     code = str(row.get("code") or "")
     asset_kind = str(row.get("asset_kind") or "cb")
@@ -1280,12 +1527,17 @@ def normalize_auction(
     if auction.stock_price and conversion:
         auction.parity = round(auction.stock_price / conversion * 100, 2)
 
-    low, high, fair, advice, notes = analyze_bid_range(
-        floor, auction.parity, premium_stats, putback
+    win_stats = None
+    if raw_rows is not None:
+        win_stats = blended_cb_win_stats(raw_rows, auction.auction_lots)
+    low, high, fair, est_avg, est_clear, advice, notes = analyze_bid_range(
+        floor, auction.parity, premium_stats, putback, win_stats=win_stats
     )
     auction.bid_low = low
     auction.bid_high = high
     auction.fair_value = fair
+    auction.est_market_avg = est_avg
+    auction.est_clear_price = est_clear
     auction.advice = advice
     auction.notes = notes
     if meta and meta.premium_pct is not None:
@@ -1360,9 +1612,15 @@ def format_tickets(plan: PositionPlan) -> list[str]:
         avg = sum(t.price * t.lots for t in plan.tickets) / max(
             sum(t.lots for t in plan.tickets), 1
         )
-        lines.append(
-            f"  加權平均投標價約 {avg:.2f} 元；低價多張拉低成本，高價少張提高命中率。"
-        )
+        if plan.purpose_category == "stock_ipo":
+            lines.append(
+                f"  加權平均投標價約 {avg:.2f} 元；低價多張搶便宜、高價少張保命中。"
+            )
+        else:
+            lines.append(
+                f"  加權平均投標價約 {avg:.2f} 元；"
+                "張數集中合理價附近以提高命中率，目標得標均價低於全場均價。"
+            )
     return lines
 
 
@@ -1705,6 +1963,7 @@ def run(args: argparse.Namespace) -> int:
                 shares_map=shares_map if enrich and basic.asset_kind == "cb" else None,
                 purpose_cache=purpose_cache if enrich and basic.asset_kind == "cb" else None,
                 stock_premium_stats=stock_stats,
+                raw_rows=raw,
             )
         )
 
