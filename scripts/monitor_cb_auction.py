@@ -47,15 +47,17 @@ USER_AGENT = "Mozilla/5.0 (compatible; twse-auction-monitor/2.0)"
 
 FACE_VALUE = 100_000  # 可轉債每張面額 10 萬；股票每張 1000 股
 STOCK_LOT_SHARES = 1000
-# 市值越大、標單筆數越多（提高命中率）；小型至少 5 筆
+# 可轉債改以 5 筆為主（集中火力提高命中率）；超大型最多 5 筆亦足夠
 TICKETS_BY_TIER = {
     "micro": 5,
     "small": 5,
-    "mid": 7,
-    "large": 8,
-    "mega": 10,
+    "mid": 5,
+    "large": 5,
+    "mega": 5,
     "unknown": 5,
 }
+# 35834 經驗：歷史中位溢價常低估熱門案清算價，估價再加一層命中緩衝
+CB_FILL_BUFFER = 1.035
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
@@ -250,27 +252,23 @@ def apply_purpose_to_bids(
     floor: float,
     purpose: PurposeInfo,
 ) -> tuple[float, float, list[str]]:
-    """依資金用途壓縮或放寬標價上緣。"""
+    """依資金用途微調標價；35834 後改為少壓縮上緣，避免命中率被用途折扣吃掉。"""
     notes: list[str] = []
     low, high = bid_low, bid_high
     cat = purpose.category
     if cat == "growth":
-        # 成長案可稍微靠近上緣，但不盲目加價
-        high = min(high * 1.01, high + 1.0)
-        notes.append("成長用途：可相對積極，但仍以合理價附近為核心倉")
+        high = min(high * 1.015, high + 1.5)
+        notes.append("成長用途：上緣略放寬，提高熱門案命中率")
     elif cat == "refinance":
-        # 還債案：上緣壓回合理價附近，避免追高
-        high = min(high, max(fair * 1.02, (fair + floor) / 2 + (fair - floor) * 0.35))
-        high = max(high, low)
-        notes.append("還債／調度用途：建議標價勿衝太高，保險倉靠近合理價即可")
+        # 仍可參與，但保險倉不要壓回合理價（否則熱門案幾乎全軍覆沒）
+        high = max(high, fair * 1.04)
+        notes.append("還債／調度用途：可參與，上緣保留命中緩衝、勿過度追最高")
     elif cat == "working_capital":
-        high = min(high, fair + (bid_high - fair) * 0.7)
-        high = max(high, low)
-        notes.append("營運資金用途：中性，維持合理區間、少追高")
+        high = max(high, fair * 1.035)
+        notes.append("營運資金用途：中性，維持清算帶以上的命中火力")
     elif cat == "mixed":
-        high = min(high, fair + (bid_high - fair) * 0.85)
-        high = max(high, low)
-        notes.append("混合用途：可參與但控制最高標")
+        high = max(high, fair * 1.04)
+        notes.append("混合用途：可參與，上緣保留命中緩衝")
     return round(low, 2), round(high, 2), notes
 
 
@@ -696,17 +694,17 @@ def tickets_for_tier(tier: str) -> int:
 
 
 def _ladder_weights(n: int, mode: str) -> list[float]:
-    """cheap_heavy：低價多張；fill_first：張數集中在合理價附近以提高命中率。"""
+    """cheap_heavy：低價多張；fill_first：張數集中在清算帶上緣以提高命中率。"""
     if n <= 1:
         return [1.0]
     if mode == "cheap_heavy":
         return [float(n - i) for i in range(n)]
-    # fill_first：峰値略偏合理價中上段，提高落在清算帶以上的張數占比
-    peak = 0.52 * (n - 1)
+    # 35834 後：峰値改偏上緣（約 70% 位置），減少便宜倉空包彈
+    peak = 0.70 * (n - 1)
     weights: list[float] = []
     for i in range(n):
         dist = abs(i - peak)
-        weights.append(max(1.0, n * 1.05 - dist * 1.45))
+        weights.append(max(1.0, n * 1.15 - dist * 1.25))
     return weights
 
 
@@ -718,23 +716,22 @@ def _rebalance_lots_for_beat_avg(
     fair: float,
     min_lot: int,
 ) -> list[int]:
-    """把過高價張數往合理價附近挪，目標投標／得標均價低於預估全場均價。"""
+    """保留足夠保險倉；僅在整包均價明顯高於預估全場時，才把過高張數往合理價挪。"""
     if not market_avg_cap or market_avg_cap <= 0 or not lots_list:
         return lots_list
     lots = list(lots_list)
     n = len(lots)
-    below = [i for i, p in enumerate(prices) if p <= market_avg_cap + 1e-9]
+    below = [i for i, p in enumerate(prices) if p <= market_avg_cap * 1.01 + 1e-9]
     if not below:
         return lots
 
     def recv_idx() -> int:
-        # 優先落到最接近合理價、且不高於全場均價的標單
         return min(below, key=lambda i: (abs(prices[i] - fair), -prices[i]))
 
-    # 高於目標均價的張數合計不超过約 8%（保險倉）
+    # 保險倉可到約 28%（熱門案要靠上緣命中）
     total = sum(lots)
     if total > 0:
-        above_cap = max(int(total * 0.08), min_lot)
+        above_cap = max(int(total * 0.28), min_lot)
         above_idx = [i for i, p in enumerate(prices) if p > market_avg_cap]
         above_lots = sum(lots[i] for i in above_idx)
         while above_lots > above_cap:
@@ -749,14 +746,12 @@ def _rebalance_lots_for_beat_avg(
         s = sum(lots)
         return sum(prices[i] * lots[i] for i in range(n)) / max(s, 1)
 
-    # 整包加權均價壓到預估全場均價的 99.5% 以下
+    # 只在明顯高於預估全場時微調；優先保住命中率
     guard = 0
-    target = market_avg_cap * 0.995
+    target = market_avg_cap * 1.01
     while vwap() > target and guard < 10_000:
         guard += 1
-        donors = [i for i in range(n) if prices[i] > fair and lots[i] > min_lot]
-        if not donors:
-            donors = [i for i in range(n) if lots[i] > min_lot and prices[i] > prices[recv_idx()]]
+        donors = [i for i in range(n) if prices[i] > market_avg_cap * 1.02 and lots[i] > min_lot]
         if not donors:
             break
         donor = max(donors, key=lambda i: prices[i])
@@ -835,11 +830,10 @@ def build_ladder_tickets(
                 lots_list[i] += min_lot
 
     if weight_mode == "fill_first":
-        # 再平衡以上限取「預估全場均價」與「合理價略上方」較低者，
-        # 讓多數得標張數落在全場均價之下。
+        # 再平衡上限放寬：優先保住上緣命中張數
         beat_cap = market_avg_cap
         if market_avg_cap is not None:
-            beat_cap = min(market_avg_cap, fair * 1.004)
+            beat_cap = max(market_avg_cap, fair * 1.01)
         lots_list = _rebalance_lots_for_beat_avg(
             prices,
             lots_list,
@@ -942,7 +936,7 @@ def build_position_plan(
         f"市值約 {cap_txt} → {tier_label}股，基準配置 {base / 1e4:.0f} 萬；"
         + ("；".join(reasons) if reasons else "無額外加減碼")
         + f"。資金用途評分 {purpose.score}/100（{purpose.label}）；"
-        + f"建議 {len(tickets) or n_tickets} 筆階梯標：張數集中合理價附近以提高命中率，目標得標均價低於全場。"
+        + f"建議 {len(tickets) or n_tickets} 筆階梯標：火力集中清算帶以上以提高命中率（35834 經驗）。"
     )
     return PositionPlan(
         size_tier=tier,
@@ -1080,11 +1074,11 @@ def blended_cb_win_stats(
     if size_stats["count"] < 8:
         return all_stats
     if auction_lots and auction_lots >= 20_000:
-        w = 0.65
+        w = 0.75
     elif auction_lots and auction_lots >= 10_000:
-        w = 0.55
+        w = 0.70
     else:
-        w = 0.40
+        w = 0.50
     out: dict[str, float] = {"count": size_stats["count"]}
     for key in (
         "avg_median",
@@ -1095,6 +1089,9 @@ def blended_cb_win_stats(
         "min_p75",
     ):
         out[key] = w * size_stats[key] + (1.0 - w) * all_stats[key]
+    # 清算／均價再往同規模 P50~P75 靠攏，降低熱門案低估
+    out["min_median"] = 0.55 * out["min_median"] + 0.45 * out["min_p75"]
+    out["avg_median"] = 0.55 * out["avg_median"] + 0.45 * out["avg_p75"]
     return out
 
 
@@ -1356,8 +1353,8 @@ def analyze_bid_range(
 ) -> tuple[float, float, float, float, float, str, list[str]]:
     """回傳 low, high, fair, est_market_avg, est_clear, advice, notes。
 
-    策略：寧可少賺一點也提高命中率，並讓得標均價目標低於預估全場均價。
-    核心想法：多數張數放在「預估清算價 ~ 全場均價」下半段，少量保險倉略高於均價。
+    35834 經驗後：估價加上命中緩衝，核心倉貼近／略高於預估清算，
+    保險倉拉高；仍盡量讓加權均價靠近但不盲目低於已被低估的「全場均價」。
     """
     notes: list[str] = []
     if win_stats:
@@ -1375,32 +1372,34 @@ def analyze_bid_range(
         min_p25 = max(avg_p25 - 2.0, 0.0)
         min_p75 = avg_med
 
-    # 清算價略打折，避免大型案同規模溢價把核心倉推到全場均價之上
-    clear_raw = floor * (1 + min_med / 100)
-    clear_est = clear_raw * 0.99
-    # 歷史上得標均價約 = 最低得標 × 1.022；再與直接均價溢價取較保守者
-    market_avg = min(clear_est * 1.022, floor * (1 + avg_med / 100))
+    # 不再對清算價打折；再乘命中緩衝，避免熱門案整包落在最低得標之下
+    clear_est = floor * (1 + min_med / 100) * CB_FILL_BUFFER
+    market_avg = max(
+        clear_est * 1.018,
+        floor * (1 + avg_med / 100) * CB_FILL_BUFFER,
+    )
 
     if parity is not None and parity >= 100:
-        fair = min(parity * 0.985, clear_est * 1.008, market_avg * 0.992)
-        low = max(floor, min(clear_est * 0.988, fair * 0.975))
-        high = max(min(parity * 1.015, market_avg * 1.03), clear_est * 1.04)
+        fair = min(parity * 0.99, max(clear_est * 1.01, market_avg * 0.995))
+        low = max(floor, clear_est * 0.995)
+        high = max(parity * 1.02, market_avg * 1.045, clear_est * 1.06)
         advice = (
-            "價內標的：以提高命中率為主，標單集中在預估清算價～全場均價附近；"
-            "目標得標均價低於全場均價。"
+            "價內標的：35834 經驗後改更偏命中率，標單集中在清算價以上；"
+            "少量保險倉高於預估全場均價。"
         )
         notes.append(f"轉換價值 {parity:.1f}%，屬價內標的。")
     else:
-        fair = min(clear_est * 1.008, market_avg * 0.992)
-        # 下緣貼近清算帶，減少「絕對到不了」的過低標
-        low = max(floor, clear_est * 0.988, floor * (1 + min_p25 / 100 * 0.9))
-        high = max(market_avg * 1.018, clear_est * 1.045, floor * (1 + min_p75 / 100 * 0.9))
-        # 上緣不要被高分位拉太高（命中靠集中，不靠追最高）
-        high = min(high, market_avg * 1.035)
-        high = max(high, fair + max(floor * 0.01, 1.0))
+        fair = max(clear_est * 1.012, market_avg * 0.995)
+        low = max(floor, clear_est * 0.995)
+        high = max(
+            market_avg * 1.045,
+            clear_est * 1.06,
+            floor * (1 + min_p75 / 100) * CB_FILL_BUFFER,
+            floor * (1 + avg_p75 / 100) * 0.98,
+        )
         advice = (
-            "策略偏命中率：寧可少賺一點，標單集中預估清算附近；"
-            "目標得標均價低於全場競拍均價。"
+            "策略強化命中率（參考辛耘四只中 2 張）：核心倉抬到清算帶以上，"
+            "保險倉加厚；寧可少賺也要避免整包落空。"
         )
         if parity is not None:
             notes.append(f"轉換價值 {parity:.1f}%，屬價外，主要受底標與信用/賣回條件支撐。")
@@ -1408,7 +1407,7 @@ def analyze_bid_range(
     notes.append(f"預估最低得標約 {clear_est:.2f}｜預估全場均價約 {market_avg:.2f}")
     notes.append(
         f"歷史溢價樣本：均價中位 {avg_med:.1f}%／清算中位 {min_med:.1f}%"
-        f"（P25~P75 均價 {avg_p25:.1f}%~{avg_p75:.1f}%）"
+        f"（P25~P75 均價 {avg_p25:.1f}%~{avg_p75:.1f}%）；已加命中緩衝 { (CB_FILL_BUFFER-1)*100:.1f}%"
     )
 
     if putback and putback > floor:
@@ -1619,7 +1618,7 @@ def format_tickets(plan: PositionPlan) -> list[str]:
         else:
             lines.append(
                 f"  加權平均投標價約 {avg:.2f} 元；"
-                "張數集中合理價附近以提高命中率，目標得標均價低於全場均價。"
+                "5 筆階梯、火力集中清算帶以上，優先提高命中率。"
             )
     return lines
 
