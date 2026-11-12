@@ -1,6 +1,95 @@
 {
-  "last_run": "2026-11-11T23:05:26.197633+08:00",
+  "last_run": "2026-11-12T23:05:39.947008+08:00",
   "auctions": {
+    "7889": {
+      "bond_code": "7889",
+      "name": "騰勢",
+      "bond_type": "初上櫃",
+      "auction_method": "美國標",
+      "market_label": "櫃檯買賣",
+      "bid_period": "2026-11-16~2026-11-18",
+      "open_date": "2026-11-20",
+      "listing_date": "2026-12-01",
+      "broker": "凱基   ",
+      "auction_lots": 1404,
+      "floor_price": 43.86,
+      "min_lot": 1,
+      "min_win_price": 0.0,
+      "max_win_price": 0.0,
+      "underwriting_price": 0.0,
+      "cancelled": "",
+      "status": "upcoming",
+      "stock_code": "7889",
+      "meta": null,
+      "stock_price": 61.8,
+      "parity": null,
+      "conversion_price": null,
+      "bid_low": 46.03,
+      "bid_high": 55.3,
+      "fair_value": 50.97,
+      "est_market_avg": null,
+      "est_clear_price": null,
+      "advice": "以興櫃價為錨、打適當折價階梯標；低價多張搶便宜、高價少張保命中。興櫃轉上市仍有破發與流動性風險，勿用滿額追高。",
+      "notes": [
+        "競拍張數 1,404｜單標上限 185 張",
+        "興櫃／參考價 61.80 元，建議相對興櫃折價約 18%（約 8.2 折；體質 51/情緒 52）",
+        "一般板初上櫃",
+        "競拍規模約 0.6 億，偏小型、投機性較高",
+        "近期股票競拍中位溢價約 32%，情緒中性",
+        "樣本 56 檔已開標股票競拍"
+      ],
+      "position": {
+        "size_tier": "small",
+        "market_cap_yi": 0.6157944,
+        "target_budget_twd": 1500000,
+        "deposit_est_twd": 703715,
+        "tickets": [
+          {
+            "price": 46.03,
+            "lots": 13,
+            "amount_twd": 598390,
+            "role": "cheap"
+          },
+          {
+            "price": 48.5,
+            "lots": 7,
+            "amount_twd": 339500,
+            "role": "core"
+          },
+          {
+            "price": 50.97,
+            "lots": 5,
+            "amount_twd": 254850,
+            "role": "core"
+          },
+          {
+            "price": 53.13,
+            "lots": 3,
+            "amount_twd": 159390,
+            "role": "core"
+          },
+          {
+            "price": 55.3,
+            "lots": 1,
+            "amount_twd": 55300,
+            "role": "insure"
+          }
+        ],
+        "rationale": "股票競拍｜體質 51/100、情緒 52/100；基準配置 150 萬；建議 5 筆階梯標；相對興櫃折價約 18%（約 8.2 折）",
+        "purpose_category": "stock_ipo",
+        "purpose_score": 51,
+        "purpose_label": "股票競拍",
+        "purpose_text": "初上櫃"
+      },
+      "asset_kind": "stock",
+      "deposit_ratio": 0.5,
+      "max_lot": 185,
+      "otc_price": 61.8,
+      "discount_pct": 17.5,
+      "quality_score": 51,
+      "sentiment_score": 52,
+      "fee_per_ticket": 400
+    },
     "7869": {
       "bond_code": "7869",
       "name": "宏于電機",
@@ -21,20 +110,20 @@
       "status": "bidding",
       "stock_code": "7869",
       "meta": null,
-      "stock_price": 280.0,
+      "stock_price": 293.0,
       "parity": null,
       "conversion_price": null,
-      "bid_low": 212.58,
-      "bid_high": 254.58,
-      "fair_value": 234.98,
+      "bid_low": 222.45,
+      "bid_high": 266.4,
+      "fair_value": 245.89,
       "est_market_avg": null,
       "est_clear_price": null,
       "advice": "以興櫃價為錨、打適當折價階梯標；低價多張搶便宜、高價少張保命中。興櫃轉上市仍有破發與流動性風險，勿用滿額追高。",
       "notes": [
         "競拍張數 1,844｜單標上限 253 張",
-        "興櫃／參考價 280.00 元，建議相對興櫃折價約 16%（約 8.4 折；體質 60/情緒 52）",
+        "興櫃／參考價 293.00 元，建議相對興櫃折價約 16%（約 8.4 折；體質 60/情緒 52）",
         "一般板初上櫃",
-        "興櫃價為底標 1.5 倍，具合理溢價空間",
+        "興櫃價為底標 1.6 倍，具合理溢價空間",
         "近期股票競拍中位溢價約 32%，情緒中性",
         "樣本 56 檔已開標股票競拍"
       ],
@@ -42,36 +131,36 @@
         "size_tier": "small",
         "market_cap_yi": 3.3352428,
         "target_budget_twd": 1500000,
-        "deposit_est_twd": 691640,
+        "deposit_est_twd": 723750,
         "tickets": [
           {
-            "price": 212.58,
+            "price": 222.45,
             "lots": 2,
-            "amount_twd": 425160,
+            "amount_twd": 444900,
             "role": "cheap"
           },
           {
-            "price": 223.78,
+            "price": 234.17,
             "lots": 1,
-            "amount_twd": 223780,
+            "amount_twd": 234170,
             "role": "core"
           },
           {
-            "price": 234.98,
+            "price": 245.89,
             "lots": 1,
-            "amount_twd": 234980,
+            "amount_twd": 245890,
             "role": "core"
           },
           {
-            "price": 244.78,
+            "price": 256.14,
             "lots": 1,
-            "amount_twd": 244780,
+            "amount_twd": 256140,
             "role": "core"
           },
           {
-            "price": 254.58,
+            "price": 266.4,
             "lots": 1,
-            "amount_twd": 254580,
+            "amount_twd": 266400,
             "role": "insure"
           }
         ],
@@ -84,7 +173,7 @@
       "asset_kind": "stock",
       "deposit_ratio": 0.5,
       "max_lot": 253,
-      "otc_price": 280.0,
+      "otc_price": 293.0,
       "discount_pct": 16.1,
       "quality_score": 60,
       "sentiment_score": 52,
@@ -122,7 +211,7 @@
         "conversion_price": null,
         "listing_date": "-"
       },
-      "stock_price": 136.5,
+      "stock_price": 127.5,
       "parity": null,
       "conversion_price": null,
       "bid_low": 118.02,
@@ -132,7 +221,7 @@
       "est_clear_price": 118.37,
       "advice": "雙目標策略：命中率優先（核心倉在清算帶以上），且投標加權均價目標低於／接近預估全場均價。",
       "notes": [
-        "正股 2344 最近收盤 136.50 元",
+        "正股 2344 最近收盤 127.50 元",
         "預估最低得標約 118.37｜預估全場均價約 120.99",
         "歷史溢價樣本：均價中位 21.0%／清算中位 18.4%（P25~P75 均價 9.6%~27.1%）",
         "資金用途：因應未來產能擴充及提升製程支應外幣購置機器設備 之資金需求（偏成長用途，評分 82）",
@@ -140,7 +229,7 @@
       ],
       "position": {
         "size_tier": "mega",
-        "market_cap_yi": 6142.5,
+        "market_cap_yi": 5737.5,
         "target_budget_twd": 13200000,
         "deposit_est_twd": 7919080,
         "tickets": [
@@ -175,7 +264,7 @@
             "role": "insure"
           }
         ],
-        "rationale": "市值約 6142 億 → 超大型股，基準配置 1000 萬；資金用途偏成長（偏成長用途），部位略增；TCRI 3 較佳，部位略增；無擔保，維持信用風險折扣；成長用途：上緣略放寬。資金用途評分 82/100（偏成長用途）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
+        "rationale": "市值約 5738 億 → 超大型股，基準配置 1000 萬；資金用途偏成長（偏成長用途），部位略增；TCRI 3 較佳，部位略增；無擔保，維持信用風險折扣；成長用途：上緣略放寬。資金用途評分 82/100（偏成長用途）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
         "purpose_category": "growth",
         "purpose_score": 82,
         "purpose_label": "偏成長用途",
@@ -222,7 +311,7 @@
         "conversion_price": null,
         "listing_date": "-"
       },
-      "stock_price": 104.5,
+      "stock_price": 102.5,
       "parity": null,
       "conversion_price": null,
       "bid_low": 113.62,
@@ -232,7 +321,7 @@
       "est_clear_price": 113.96,
       "advice": "雙目標策略：命中率優先（核心倉在清算帶以上），且投標加權均價目標低於／接近預估全場均價。",
       "notes": [
-        "正股 1569 最近收盤 104.50 元",
+        "正股 1569 最近收盤 102.50 元",
         "預估最低得標約 113.96｜預估全場均價約 116.82",
         "歷史溢價樣本：均價中位 16.8%／清算中位 14.0%（P25~P75 均價 5.8%~21.2%）",
         "資金用途：未取得（用途未明，評分 50）",
@@ -240,7 +329,7 @@
       ],
       "position": {
         "size_tier": "mid",
-        "market_cap_yi": 150.74,
+        "market_cap_yi": 147.85,
         "target_budget_twd": 1800000,
         "deposit_est_twd": 1041485,
         "tickets": [
@@ -275,7 +364,7 @@
             "role": "insure"
           }
         ],
-        "rationale": "市值約 151 億 → 中型股，基準配置 250 萬；查無董事會發行決議；TCRI 7 偏弱，部位下修控風險；有擔保（台新銀），部位略增。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
+        "rationale": "市值約 148 億 → 中型股，基準配置 250 萬；查無董事會發行決議；TCRI 7 偏弱，部位下修控風險；有擔保（台新銀），部位略增。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
         "purpose_category": "unknown",
         "purpose_score": 50,
         "purpose_label": "用途未明",
