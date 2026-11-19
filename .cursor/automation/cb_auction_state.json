@@ -1,5 +1,5 @@
 {
-  "last_run": "2026-11-18T23:05:03.785710+08:00",
+  "last_run": "2026-11-19T23:02:33.444943+08:00",
   "auctions": {
     "45403": {
       "bond_code": "45403",
@@ -18,7 +18,7 @@
       "max_win_price": 0.0,
       "underwriting_price": 0.0,
       "cancelled": "",
-      "status": "upcoming",
+      "status": "bidding",
       "stock_code": "4540",
       "meta": {
         "stock_code": "4540",
@@ -33,7 +33,7 @@
         "conversion_price": null,
         "listing_date": "-"
       },
-      "stock_price": 46.75,
+      "stock_price": 42.15,
       "parity": null,
       "conversion_price": null,
       "bid_low": 111.39,
@@ -43,7 +43,7 @@
       "est_clear_price": 111.73,
       "advice": "雙目標策略：命中率優先（核心倉在清算帶以上），且投標加權均價目標低於／接近預估全場均價。",
       "notes": [
-        "正股 4540 最近收盤 46.75 元",
+        "正股 4540 最近收盤 42.15 元",
         "預估最低得標約 111.73｜預估全場均價約 114.98",
         "歷史溢價樣本：均價中位 14.4%／清算中位 11.2%（P25~P75 均價 5.6%~20.9%）",
         "資金用途：未取得（用途未明，評分 50）",
@@ -51,7 +51,7 @@
       ],
       "position": {
         "size_tier": "small",
-        "market_cap_yi": 53.85,
+        "market_cap_yi": 48.55,
         "target_budget_twd": 1100000,
         "deposit_est_twd": 627070,
         "tickets": [
@@ -86,7 +86,7 @@
             "role": "insure"
           }
         ],
-        "rationale": "市值約 54 億 → 小型股，基準配置 150 萬；查無董事會發行決議；TCRI 8 偏弱，部位下修控風險；有擔保（第一商銀），部位略增。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
+        "rationale": "市值約 49 億 → 小型股，基準配置 150 萬；查無董事會發行決議；TCRI 8 偏弱，部位下修控風險；有擔保（第一商銀），部位略增。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
         "purpose_category": "unknown",
         "purpose_score": 50,
         "purpose_label": "用途未明",
@@ -133,7 +133,7 @@
         "conversion_price": null,
         "listing_date": "-"
       },
-      "stock_price": 465.5,
+      "stock_price": 419.0,
       "parity": null,
       "conversion_price": null,
       "bid_low": 116.55,
@@ -143,7 +143,7 @@
       "est_clear_price": 116.9,
       "advice": "雙目標策略：命中率優先（核心倉在清算帶以上），且投標加權均價目標低於／接近預估全場均價。",
       "notes": [
-        "正股 7711 最近收盤 465.50 元",
+        "正股 7711 最近收盤 419.00 元",
         "預估最低得標約 116.90｜預估全場均價約 120.28",
         "歷史溢價樣本：均價中位 20.3%／清算中位 16.9%（P25~P75 均價 7.7%~26.5%）",
         "資金用途：充實營運資金、償還銀行借款（還債＋營運資金，評分 32）",
@@ -151,7 +151,7 @@
       ],
       "position": {
         "size_tier": "mid",
-        "market_cap_yi": 333.77,
+        "market_cap_yi": 300.42,
         "target_budget_twd": 1900000,
         "deposit_est_twd": 1131225,
         "tickets": [
@@ -186,7 +186,7 @@
             "role": "insure"
           }
         ],
-        "rationale": "市值約 334 億 → 中型股，基準配置 250 萬；資金用途偏還債／調度（還債＋營運資金），部位下修；無擔保，維持信用風險折扣；還債／調度用途：維持清算帶火力，均價目標貼近全場。資金用途評分 32/100（還債＋營運資金）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
+        "rationale": "市值約 300 億 → 中型股，基準配置 250 萬；資金用途偏還債／調度（還債＋營運資金），部位下修；無擔保，維持信用風險折扣；還債／調度用途：維持清算帶火力，均價目標貼近全場。資金用途評分 32/100（還債＋營運資金）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
         "purpose_category": "refinance",
         "purpose_score": 32,
         "purpose_label": "還債＋營運資金",
@@ -218,21 +218,21 @@
       "max_win_price": 0.0,
       "underwriting_price": 0.0,
       "cancelled": "",
-      "status": "bidding",
+      "status": "awaiting_result",
       "stock_code": "7889",
       "meta": null,
-      "stock_price": 56.1,
+      "stock_price": 56.0,
       "parity": null,
       "conversion_price": null,
       "bid_low": 43.86,
-      "bid_high": 50.2,
-      "fair_value": 46.27,
+      "bid_high": 50.11,
+      "fair_value": 46.19,
       "est_market_avg": null,
       "est_clear_price": null,
       "advice": "以興櫃價為錨、打適當折價階梯標；低價多張搶便宜、高價少張保命中。興櫃轉上市仍有破發與流動性風險，勿用滿額追高。",
       "notes": [
         "競拍張數 1,404｜單標上限 185 張",
-        "興櫃／參考價 56.10 元，建議相對興櫃折價約 18%（約 8.2 折；體質 51/情緒 52）",
+        "興櫃／參考價 56.00 元，建議相對興櫃折價約 18%（約 8.2 折；體質 51/情緒 52）",
         "一般板初上櫃",
         "競拍規模約 0.6 億，偏小型、投機性較高",
         "近期股票競拍中位溢價約 32%，情緒中性",
@@ -242,7 +242,7 @@
         "size_tier": "small",
         "market_cap_yi": 0.6157944,
         "target_budget_twd": 1500000,
-        "deposit_est_twd": 728869,
+        "deposit_est_twd": 728219,
         "tickets": [
           {
             "price": 43.86,
@@ -251,27 +251,27 @@
             "role": "cheap"
           },
           {
-            "price": 45.06,
+            "price": 45.02,
             "lots": 8,
-            "amount_twd": 360480,
+            "amount_twd": 360160,
             "role": "core"
           },
           {
-            "price": 46.27,
+            "price": 46.19,
             "lots": 6,
-            "amount_twd": 277620,
+            "amount_twd": 277140,
             "role": "core"
           },
           {
-            "price": 48.23,
+            "price": 48.15,
             "lots": 4,
-            "amount_twd": 192920,
+            "amount_twd": 192600,
             "role": "core"
           },
           {
-            "price": 50.2,
+            "price": 50.11,
             "lots": 2,
-            "amount_twd": 100400,
+            "amount_twd": 100220,
             "role": "insure"
           }
         ],
@@ -284,7 +284,7 @@
       "asset_kind": "stock",
       "deposit_ratio": 0.5,
       "max_lot": 185,
-      "otc_price": 56.1,
+      "otc_price": 56.0,
       "discount_pct": 17.5,
       "quality_score": 51,
       "sentiment_score": 52,
@@ -360,7 +360,7 @@
         "auction_schedule": "競拍 11/11-11/13",
         "premium_pct": null,
         "conversion_price": null,
-        "listing_date": "134.00"
+        "listing_date": "105.10%"
       },
       "stock_price": null,
       "parity": null,
