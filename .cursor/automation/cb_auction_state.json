@@ -1,5 +1,5 @@
 {
-  "last_run": "2026-11-24T23:04:52.193771+08:00",
+  "last_run": "2026-11-25T23:03:16.831575+08:00",
   "auctions": {
     "45403": {
       "bond_code": "45403",
@@ -14,9 +14,9 @@
       "auction_lots": 2550,
       "floor_price": 100.5,
       "min_lot": 1,
-      "min_win_price": 0.0,
-      "max_win_price": 0.0,
-      "underwriting_price": 0.0,
+      "min_win_price": 100.5,
+      "max_win_price": 102.03,
+      "underwriting_price": 100.5,
       "cancelled": "",
       "status": "awaiting_result",
       "stock_code": "4540",
@@ -29,13 +29,13 @@
         "issue_amount_100m": 3.0,
         "broker": "第一金證",
         "auction_schedule": "競拍 11/19-11/23",
-        "premium_pct": 103.0,
-        "conversion_price": 55.6,
-        "listing_date": "2026/12/04"
+        "premium_pct": null,
+        "conversion_price": null,
+        "listing_date": "55.60"
       },
-      "stock_price": 45.85,
-      "parity": 82.46,
-      "conversion_price": 55.6,
+      "stock_price": 41.6,
+      "parity": null,
+      "conversion_price": null,
       "bid_low": 111.22,
       "bid_high": 116.7,
       "fair_value": 113.5,
@@ -43,20 +43,17 @@
       "est_clear_price": 111.56,
       "advice": "雙目標策略：命中率優先（核心倉在清算帶以上），且投標加權均價目標低於／接近預估全場均價。",
       "notes": [
-        "正股 4540 最近收盤 45.85 元",
-        "轉換價 55.60 元",
-        "轉換價值 82.5%，屬價外，主要受底標與信用/賣回條件支撐。",
+        "正股 4540 最近收盤 41.60 元",
         "預估最低得標約 111.56｜預估全場均價約 114.41",
         "歷史溢價樣本：均價中位 13.8%／清算中位 11.0%（P25~P75 均價 5.5%~20.9%）",
-        "公告轉換溢價率 103.00%",
         "資金用途：未取得（用途未明，評分 50）",
         "查無董事會發行決議"
       ],
       "position": {
         "size_tier": "small",
-        "market_cap_yi": 52.81,
-        "target_budget_twd": 900000,
-        "deposit_est_twd": 511440,
+        "market_cap_yi": 47.92,
+        "target_budget_twd": 1100000,
+        "deposit_est_twd": 624370,
         "tickets": [
           {
             "price": 111.22,
@@ -66,14 +63,14 @@
           },
           {
             "price": 112.36,
-            "lots": 1,
-            "amount_twd": 112360,
+            "lots": 2,
+            "amount_twd": 224720,
             "role": "core"
           },
           {
             "price": 113.5,
-            "lots": 5,
-            "amount_twd": 567500,
+            "lots": 6,
+            "amount_twd": 681000,
             "role": "core"
           },
           {
@@ -89,7 +86,7 @@
             "role": "insure"
           }
         ],
-        "rationale": "市值約 53 億 → 小型股，基準配置 150 萬；查無董事會發行決議；TCRI 8 偏弱，部位下修控風險；有擔保（第一商銀），部位略增；深價外（parity 82.5%），以債性為主、縮小部位。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
+        "rationale": "市值約 48 億 → 小型股，基準配置 150 萬；查無董事會發行決議；TCRI 8 偏弱，部位下修控風險；有擔保（第一商銀），部位略增。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
         "purpose_category": "unknown",
         "purpose_score": 50,
         "purpose_label": "用途未明",
@@ -134,7 +131,7 @@
         "auction_schedule": "競拍 11/17-11/19",
         "premium_pct": null,
         "conversion_price": null,
-        "listing_date": "550.00"
+        "listing_date": "102.29%"
       },
       "stock_price": null,
       "parity": null,
