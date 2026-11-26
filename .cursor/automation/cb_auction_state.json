@@ -1,5 +1,5 @@
 {
-  "last_run": "2026-11-25T23:03:16.831575+08:00",
+  "last_run": "2026-11-26T23:02:30.842634+08:00",
   "auctions": {
     "45403": {
       "bond_code": "45403",
@@ -18,7 +18,7 @@
       "max_win_price": 102.03,
       "underwriting_price": 100.5,
       "cancelled": "",
-      "status": "awaiting_result",
+      "status": "completed",
       "stock_code": "4540",
       "meta": {
         "stock_code": "4540",
@@ -33,65 +33,17 @@
         "conversion_price": null,
         "listing_date": "55.60"
       },
-      "stock_price": 41.6,
+      "stock_price": null,
       "parity": null,
       "conversion_price": null,
-      "bid_low": 111.22,
-      "bid_high": 116.7,
-      "fair_value": 113.5,
-      "est_market_avg": 114.41,
-      "est_clear_price": 111.56,
-      "advice": "雙目標策略：命中率優先（核心倉在清算帶以上），且投標加權均價目標低於／接近預估全場均價。",
-      "notes": [
-        "正股 4540 最近收盤 41.60 元",
-        "預估最低得標約 111.56｜預估全場均價約 114.41",
-        "歷史溢價樣本：均價中位 13.8%／清算中位 11.0%（P25~P75 均價 5.5%~20.9%）",
-        "資金用途：未取得（用途未明，評分 50）",
-        "查無董事會發行決議"
-      ],
-      "position": {
-        "size_tier": "small",
-        "market_cap_yi": 47.92,
-        "target_budget_twd": 1100000,
-        "deposit_est_twd": 624370,
-        "tickets": [
-          {
-            "price": 111.22,
-            "lots": 1,
-            "amount_twd": 111220,
-            "role": "cheap"
-          },
-          {
-            "price": 112.36,
-            "lots": 2,
-            "amount_twd": 224720,
-            "role": "core"
-          },
-          {
-            "price": 113.5,
-            "lots": 6,
-            "amount_twd": 681000,
-            "role": "core"
-          },
-          {
-            "price": 115.1,
-            "lots": 1,
-            "amount_twd": 115100,
-            "role": "core"
-          },
-          {
-            "price": 116.7,
-            "lots": 1,
-            "amount_twd": 116700,
-            "role": "insure"
-          }
-        ],
-        "rationale": "市值約 48 億 → 小型股，基準配置 150 萬；查無董事會發行決議；TCRI 8 偏弱，部位下修控風險；有擔保（第一商銀），部位略增。資金用途評分 50/100（用途未明）；建議 5 筆階梯標：命中率優先，均價目標低於／接近全場。",
-        "purpose_category": "unknown",
-        "purpose_score": 50,
-        "purpose_label": "用途未明",
-        "purpose_text": ""
-      },
+      "bid_low": null,
+      "bid_high": null,
+      "fair_value": null,
+      "est_market_avg": null,
+      "est_clear_price": null,
+      "advice": "",
+      "notes": [],
+      "position": null,
       "asset_kind": "cb",
       "deposit_ratio": 0.5,
       "max_lot": 255,
